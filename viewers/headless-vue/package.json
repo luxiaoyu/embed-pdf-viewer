@@ -1,0 +1,30 @@
+{
+  "name": "@embedpdf/headless-vue-local",
+  "private": true,
+  "version": "2.15.1",
+  "type": "module",
+  "module": "./dist/embedpdf-headless.js",
+  "scripts": {
+    "build": "vite build",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@embedpdf/core": "workspace:*",
+    "@embedpdf/engines": "workspace:*",
+    "@embedpdf/plugin-document-manager": "workspace:*",
+    "@embedpdf/plugin-interaction-manager": "workspace:*",
+    "@embedpdf/plugin-render": "workspace:*",
+    "@embedpdf/plugin-rotate": "workspace:*",
+    "@embedpdf/plugin-scroll": "workspace:*",
+    "@embedpdf/plugin-selection": "workspace:*",
+    "@embedpdf/plugin-viewport": "workspace:*",
+    "@embedpdf/plugin-zoom": "workspace:*"
+  },
+  "peerDependencies": {
+    "vue": ">=3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^6.3.5"
+  }
+}

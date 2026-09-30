@@ -33,6 +33,26 @@ function getTouchCenter(touches: TouchList): { x: number; y: number } {
   };
 }
 
+const WHEEL_LINE_HEIGHT_PX = 16;
+const MAX_WHEEL_ZOOM_DELTA_PX = 32;
+const WHEEL_ZOOM_SENSITIVITY = 0.004;
+
+/** Keep one physical wheel notch bounded while preserving small trackpad deltas. */
+export function wheelZoomFactor(deltaY: number, deltaMode: number, viewportHeight: number): number {
+  if (!Number.isFinite(deltaY)) return 1;
+  const pixelDelta =
+    deltaMode === 1
+      ? deltaY * WHEEL_LINE_HEIGHT_PX
+      : deltaMode === 2
+        ? deltaY * viewportHeight
+        : deltaY;
+  const boundedDelta = Math.max(
+    -MAX_WHEEL_ZOOM_DELTA_PX,
+    Math.min(MAX_WHEEL_ZOOM_DELTA_PX, pixelDelta),
+  );
+  return Math.exp(-boundedDelta * WHEEL_ZOOM_SENSITIVITY);
+}
+
 export function setupZoomGestures({
   element,
   container,
@@ -228,7 +248,7 @@ export function setupZoomGestures({
       clearTimeout(wheelZoomTimeout);
     }
 
-    const zoomFactor = 1 - e.deltaY * 0.01;
+    const zoomFactor = wheelZoomFactor(e.deltaY, e.deltaMode, container.clientHeight);
     accumulatedWheelScale *= zoomFactor;
     accumulatedWheelScale = Math.max(0.1, Math.min(10, accumulatedWheelScale));
     updateTransform(accumulatedWheelScale);

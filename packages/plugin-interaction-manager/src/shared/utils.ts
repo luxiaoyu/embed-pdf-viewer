@@ -227,6 +227,8 @@ export function createPointerProvider(
       normEvt = {
         clientX: tp.clientX,
         clientY: tp.clientY,
+        pointerId: tp.identifier,
+        pointerType: 'touch',
         ctrlKey: evt.ctrlKey,
         shiftKey: evt.shiftKey,
         altKey: evt.altKey,
@@ -246,6 +248,8 @@ export function createPointerProvider(
       normEvt = {
         clientX: pe.clientX,
         clientY: pe.clientY,
+        pointerId: pe.pointerId,
+        pointerType: pe.pointerType,
         ctrlKey: pe.ctrlKey,
         shiftKey: pe.shiftKey,
         altKey: pe.altKey,

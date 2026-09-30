@@ -38,9 +38,10 @@ import {
   InteractionManagerPlugin,
 } from '@embedpdf/plugin-interaction-manager';
 import { SpreadCapability, SpreadPlugin } from '@embedpdf/plugin-spread';
-import { Rect, rotateRect } from '@embedpdf/models';
+import { Rect } from '@embedpdf/models';
 import { createMarqueeHandler } from './handlers';
 import { initialDocumentState } from './reducer';
+import { zoomRequestForArea } from './zoom-to-area';
 
 export class ZoomPlugin extends BasePlugin<
   ZoomPluginConfig,
@@ -471,55 +472,23 @@ export class ZoomPlugin extends BasePlugin<
     const coreDoc = this.coreState.core.documents[documentId];
     if (!coreDoc) return;
 
-    const rotation = coreDoc.rotation;
     const viewport = this.viewport.forDocument(documentId);
-    const vp = viewport.getMetrics();
-    const vpGap = this.viewport.getViewportGap();
     const docState = this.getDocumentStateOrThrow(documentId);
-    const oldZ = docState.currentZoomLevel;
-
-    const availableW = vp.clientWidth - 2 * vpGap;
-    const availableH = vp.clientHeight - 2 * vpGap;
-
     const scrollScope = this.scroll.forDocument(documentId);
-    const layout = scrollScope.getLayout();
-
-    const vItem = layout.virtualItems.find((it) =>
-      it.pageLayouts.some((p) => p.pageIndex === pageIndex),
-    );
-    if (!vItem) return;
-
-    const pageRel = vItem.pageLayouts.find((p) => p.pageIndex === pageIndex)!;
-
-    const rotatedRect = rotateRect(
-      { width: pageRel.width, height: pageRel.height },
+    const request = zoomRequestForArea({
+      scroll: scrollScope,
+      pageIndex,
       rect,
-      rotation,
-    );
-
-    const targetZoom = this.toZoom(
-      Math.min(availableW / rotatedRect.size.width, availableH / rotatedRect.size.height),
-    );
-
-    const pageAbsX = vItem.x + pageRel.x;
-    const pageAbsY = vItem.y + pageRel.y;
-
-    const cxContent = pageAbsX + rotatedRect.origin.x + rotatedRect.size.width / 2;
-    const cyContent = pageAbsY + rotatedRect.origin.y + rotatedRect.size.height / 2;
-
-    const off = (avail: number, cw: number, z: number) =>
-      cw * z < avail ? (avail - cw * z) / 2 : 0;
-
-    const offXold = off(availableW, layout.totalContentSize.width, oldZ);
-    const offYold = off(availableH, layout.totalContentSize.height, oldZ);
-
-    const centerVX = vpGap + offXold + cxContent * oldZ - vp.scrollLeft;
-    const centerVY = vpGap + offYold + cyContent * oldZ - vp.scrollTop;
+      oldZoom: docState.currentZoomLevel,
+      viewport: viewport.getMetrics(),
+      viewportGap: this.viewport.getViewportGap(),
+    });
+    if (!request) return;
 
     this.handleRequest(
       {
-        level: targetZoom,
-        center: { vx: centerVX, vy: centerVY },
+        level: this.toZoom(request.level),
+        center: request.center,
         align: 'center',
       },
       documentId,

@@ -66,6 +66,8 @@ export interface EmbedPdfPointerEventExtensions {
 export interface EmbedPdfPointerEventBase {
   clientX: number;
   clientY: number;
+  pointerId?: number;
+  pointerType?: string;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;

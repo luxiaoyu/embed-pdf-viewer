@@ -11,7 +11,7 @@ export interface TextSelectionHandlerOptions {
   /** Check if selection is enabled for this mode */
   isEnabled: (modeId: string) => boolean;
   /** Called when drag-selection begins on a glyph */
-  onBegin: (glyphIndex: number, modeId: string) => void;
+  onBegin: (glyphIndex: number, modeId: string, pointerId?: number, pointerType?: string) => void;
   /** Called when drag-selection updates to a new glyph */
   onUpdate: (glyphIndex: number, modeId: string) => void;
   /** Called when drag-selection ends (pointer up) */
@@ -20,6 +20,8 @@ export interface TextSelectionHandlerOptions {
   onClear: (modeId: string) => void;
   /** Returns whether text selection is currently in progress */
   isSelecting: () => boolean;
+  /** Whether this event belongs to the pointer that started the active selection */
+  isActivePointer: (pointerId?: number) => boolean;
   /** Set or remove the text cursor */
   setCursor: (cursor: string | null) => void;
   /** Called when the user clicks directly on empty page space (target === currentTarget) */
@@ -66,6 +68,8 @@ export function createTextSelectionHandler(
   // Drag-threshold state
   let anchorGlyph: number | null = null;
   let anchorPos: Position | null = null;
+  let anchorPointerId: number | undefined;
+  let anchorPointerType: string | undefined;
   let dragStarted = false;
 
   // Triple-click detection: timestamp of the most recent dblclick
@@ -74,12 +78,21 @@ export function createTextSelectionHandler(
   function reset() {
     anchorGlyph = null;
     anchorPos = null;
+    anchorPointerId = undefined;
+    anchorPointerType = undefined;
     dragStarted = false;
     opts.setHasTextAnchor?.(false);
   }
 
   return {
     onPointerDown: (point: Position, evt, modeId) => {
+      if (opts.isSelecting() && !opts.isActivePointer(evt.pointerId)) return;
+
+      // A release over another page may have ended the shared selection from
+      // that page's handler. Discard this page's old drag anchor before starting
+      // a new gesture.
+      reset();
+
       // Detect click on empty page space (fires for ALL modes)
       if (evt.target === evt.currentTarget) {
         opts.onEmptySpaceClick?.(modeId);
@@ -101,13 +114,22 @@ export function createTextSelectionHandler(
       if (g !== -1) {
         anchorGlyph = g;
         anchorPos = point;
+        anchorPointerId = evt.pointerId;
+        anchorPointerType = evt.pointerType;
         dragStarted = false;
         opts.setHasTextAnchor?.(true);
       }
     },
 
-    onPointerMove: (point: Position, _evt, modeId) => {
+    onPointerMove: (point: Position, evt, modeId) => {
       if (!opts.isEnabled(modeId)) return;
+      if (
+        anchorGlyph !== null &&
+        anchorPointerId !== undefined &&
+        evt.pointerId !== anchorPointerId
+      )
+        return;
+      if (opts.isSelecting() && !opts.isActivePointer(evt.pointerId)) return;
 
       const geo = opts.getGeometry();
       if (!geo) return;
@@ -125,7 +147,7 @@ export function createTextSelectionHandler(
 
         if (dist >= minDrag) {
           dragStarted = true;
-          opts.onBegin(anchorGlyph, modeId);
+          opts.onBegin(anchorGlyph, modeId, anchorPointerId, anchorPointerType);
           if (g !== -1) {
             opts.onUpdate(g, modeId);
           }
@@ -139,16 +161,34 @@ export function createTextSelectionHandler(
       }
     },
 
-    onPointerUp: (_point: Position, _evt, modeId) => {
-      if (!opts.isEnabled(modeId)) {
-        reset();
+    onPointerUp: (_point: Position, evt, modeId) => {
+      // The pointer may have gone down on a different page. That page owns
+      // dragStarted, but the selection state is shared by the document.
+      if (opts.isSelecting()) {
+        if (!opts.isActivePointer(evt.pointerId)) return;
+        opts.onEnd(modeId);
+      } else if (
+        anchorGlyph !== null &&
+        anchorPointerId !== undefined &&
+        evt.pointerId !== anchorPointerId
+      ) {
         return;
       }
 
-      if (dragStarted) {
-        opts.onEnd(modeId);
-      }
+      reset();
+    },
 
+    onPointerCancel: (_point: Position, evt, modeId) => {
+      if (opts.isSelecting()) {
+        if (!opts.isActivePointer(evt.pointerId)) return;
+        opts.onEnd(modeId);
+      } else if (
+        anchorGlyph !== null &&
+        anchorPointerId !== undefined &&
+        evt.pointerId !== anchorPointerId
+      ) {
+        return;
+      }
       reset();
     },
 

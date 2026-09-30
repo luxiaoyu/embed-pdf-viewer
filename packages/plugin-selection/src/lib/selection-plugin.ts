@@ -86,9 +86,13 @@ export class SelectionPlugin extends BasePlugin<
   /* interactive state, per document */
   private selecting = new Map<string, boolean>();
   private anchor = new Map<string, { page: number; index: number } | undefined>();
+  private selectionPointerId = new Map<string, number | undefined>();
 
   /** Whether the text handler has a pending anchor (before drag threshold is met) */
   private hasTextAnchor = new Map<string, boolean>();
+
+  /** Fallback for pointer releases outside every page wrapper (for example, in a page gap). */
+  private stopReleaseWatch = new Map<string, () => void>();
 
   /** Tracks the page a marquee drag started on, per document */
   private marqueePage = new Map<string, number>();
@@ -242,6 +246,8 @@ export class SelectionPlugin extends BasePlugin<
   }
 
   protected override onDocumentClosed(documentId: string): void {
+    this.stopWatchingRelease(documentId);
+    this.selectionPointerId.delete(documentId);
     this.dispatch(cleanupSelectionState(documentId));
     this.enabledModesPerDoc.delete(documentId);
     this.pageCallbacks.delete(documentId);
@@ -263,6 +269,10 @@ export class SelectionPlugin extends BasePlugin<
 
   async initialize() {}
   async destroy() {
+    for (const documentId of this.stopReleaseWatch.keys()) {
+      this.stopWatchingRelease(documentId);
+    }
+    this.selectionPointerId.clear();
     this.selChange$.clear();
     this.textRetrieved$.clear();
     this.copyToClipboard$.clear();
@@ -434,11 +444,16 @@ export class SelectionPlugin extends BasePlugin<
         if (!config) return false;
         return config.enableSelection !== false;
       },
-      onBegin: (g, modeId) => this.beginSelection(documentId, pageIndex, g, modeId),
+      onBegin: (g, modeId, pointerId, pointerType) =>
+        this.beginSelection(documentId, pageIndex, g, modeId, pointerId, pointerType),
       onUpdate: (g, modeId) => this.updateSelection(documentId, pageIndex, g, modeId),
       onEnd: (modeId) => this.endSelection(documentId, modeId),
       onClear: (modeId) => this.clearSelection(documentId, modeId),
       isSelecting: () => this.selecting.get(documentId) ?? false,
+      isActivePointer: (pointerId) => {
+        const activePointerId = this.selectionPointerId.get(documentId);
+        return activePointerId === undefined || activePointerId === pointerId;
+      },
       setCursor: (cursor) =>
         cursor
           ? interactionScope.setCursor('selection-text', cursor, 10)
@@ -775,25 +790,82 @@ export class SelectionPlugin extends BasePlugin<
   }
 
   /* ── selection state updates ───────────────────────────── */
-  private beginSelection(documentId: string, page: number, index: number, modeId: string) {
+  private stopWatchingRelease(documentId: string) {
+    this.stopReleaseWatch.get(documentId)?.();
+    this.stopReleaseWatch.delete(documentId);
+  }
+
+  private watchReleaseOutsidePages(
+    documentId: string,
+    modeId: string,
+    pointerId?: number,
+    pointerType?: string,
+  ) {
+    this.stopWatchingRelease(documentId);
+    const releaseTarget = globalThis.window;
+    if (!releaseTarget) return;
+
+    // Capture the release before a page overlay can stop propagation. This also
+    // covers the page gap and toolbar, which have no page selection handler.
+    // Mouseup covers mouse releases where Chromium does not deliver pointerup;
+    // blur covers leaving the window during a drag.
+    const finish = () => {
+      if (this.selecting.get(documentId)) this.endSelection(documentId, modeId);
+    };
+    const finishPointer = (event: PointerEvent) => {
+      if (pointerId === undefined || event.pointerId === pointerId) finish();
+    };
+    const finishMouse = () => {
+      if (pointerType === 'mouse' || !pointerType) finish();
+    };
+    releaseTarget.addEventListener('pointerup', finishPointer, true);
+    releaseTarget.addEventListener('pointercancel', finishPointer, true);
+    releaseTarget.addEventListener('mouseup', finishMouse, true);
+    releaseTarget.addEventListener('blur', finish, true);
+    this.stopReleaseWatch.set(documentId, () => {
+      releaseTarget.removeEventListener('pointerup', finishPointer, true);
+      releaseTarget.removeEventListener('pointercancel', finishPointer, true);
+      releaseTarget.removeEventListener('mouseup', finishMouse, true);
+      releaseTarget.removeEventListener('blur', finish, true);
+    });
+  }
+
+  private beginSelection(
+    documentId: string,
+    page: number,
+    index: number,
+    modeId: string,
+    pointerId?: number,
+    pointerType?: string,
+  ) {
+    const previouslyHighlighted = Object.keys(this.getDocumentState(documentId).rects).map(Number);
     this.selecting.set(documentId, true);
     this.anchor.set(documentId, { page, index });
+    this.selectionPointerId.set(documentId, pointerId);
+    this.watchReleaseOutsidePages(documentId, modeId, pointerId, pointerType);
     this.dispatch(startSelection(documentId));
+    for (const previousPage of previouslyHighlighted) {
+      this.notifyPage(documentId, previousPage);
+    }
     this.beginSelection$.emit(documentId, { page, index, modeId });
     this.recalculateMenuPlacement(documentId);
   }
 
   private endSelection(documentId: string, modeId: string) {
+    this.stopWatchingRelease(documentId);
     this.selecting.set(documentId, false);
     this.anchor.set(documentId, undefined);
+    this.selectionPointerId.delete(documentId);
     this.dispatch(endSelection(documentId));
     this.endSelection$.emit(documentId, { modeId });
     this.recalculateMenuPlacement(documentId);
   }
 
   private clearSelection(documentId: string, _modeId?: string) {
+    this.stopWatchingRelease(documentId);
     this.selecting.set(documentId, false);
     this.anchor.set(documentId, undefined);
+    this.selectionPointerId.delete(documentId);
     this.dispatch(clearSelection(documentId));
     this.selChange$.emit(documentId, null);
     this.emitMenuPlacement(documentId, null);
@@ -813,10 +885,7 @@ export class SelectionPlugin extends BasePlugin<
    *
    * @returns a task that resolves once the selection has been applied.
    */
-  private applySelection(
-    documentId: string,
-    range: SelectionRangeX | null,
-  ): PdfTask<void> {
+  private applySelection(documentId: string, range: SelectionRangeX | null): PdfTask<void> {
     // Ensure the document state exists before doing anything.
     if (!this.state.documents[documentId]) {
       return PdfTaskHelper.reject({
@@ -853,57 +922,62 @@ export class SelectionPlugin extends BasePlugin<
     const geoTasks = pages.map((p) => this.getOrLoadGeometry(documentId, p));
     const result = PdfTaskHelper.create<void>();
 
-    Task.all(geoTasks).wait(() => {
-      // The document may have been closed while geometry was loading.
-      if (!this.state.documents[documentId]) {
-        result.reject({
-          code: PdfErrorCode.NotFound,
-          message: `Selection state not found for document: ${documentId}`,
-        });
-        return;
-      }
+    Task.all(geoTasks).wait(
+      () => {
+        // The document may have been closed while geometry was loading.
+        if (!this.state.documents[documentId]) {
+          result.reject({
+            code: PdfErrorCode.NotFound,
+            message: `Selection state not found for document: ${documentId}`,
+          });
+          return;
+        }
 
-      // Clamp glyph indices to the actual glyph counts now that geometry is
-      // available. This keeps a persisted selection usable even if the caller
-      // passed an index past the end of a (possibly changed) page.
-      const clamped = this.clampRangeToGeometry(documentId, normalized);
-      if (!clamped) {
-        result.reject({
-          code: PdfErrorCode.NotFound,
-          message: `Cannot apply selection: page(s) ${normalized.start.page}-${normalized.end.page} have no text geometry`,
-        });
-        return;
-      }
+        // Clamp glyph indices to the actual glyph counts now that geometry is
+        // available. This keeps a persisted selection usable even if the caller
+        // passed an index past the end of a (possibly changed) page.
+        const clamped = this.clampRangeToGeometry(documentId, normalized);
+        if (!clamped) {
+          result.reject({
+            code: PdfErrorCode.NotFound,
+            message: `Cannot apply selection: page(s) ${normalized.start.page}-${normalized.end.page} have no text geometry`,
+          });
+          return;
+        }
 
-      this.selecting.set(documentId, false);
-      this.anchor.set(documentId, undefined);
+        this.stopWatchingRelease(documentId);
+        this.selecting.set(documentId, false);
+        this.anchor.set(documentId, undefined);
+        this.selectionPointerId.delete(documentId);
 
-      // Remember which pages currently render highlights so we can repaint
-      // them too. Otherwise a previous selection on pages outside the new
-      // range would leave stale highlight rects on screen.
-      const previouslyHighlighted = Object.keys(this.getDocumentState(documentId).rects).map(
-        Number,
-      );
+        // Remember which pages currently render highlights so we can repaint
+        // them too. Otherwise a previous selection on pages outside the new
+        // range would leave stale highlight rects on screen.
+        const previouslyHighlighted = Object.keys(this.getDocumentState(documentId).rects).map(
+          Number,
+        );
 
-      this.dispatch(startSelection(documentId));
-      this.dispatch(setSelection(documentId, clamped));
-      this.updateRectsAndSlices(documentId, clamped);
-      this.dispatch(endSelection(documentId));
+        this.dispatch(startSelection(documentId));
+        this.dispatch(setSelection(documentId, clamped));
+        this.updateRectsAndSlices(documentId, clamped);
+        this.dispatch(endSelection(documentId));
 
-      this.selChange$.emit(documentId, clamped);
+        this.selChange$.emit(documentId, clamped);
 
-      // Notify the union of previously-highlighted pages and the new range so
-      // deselected pages clear their rects and newly-selected pages paint.
-      const pagesToNotify = new Set<number>(previouslyHighlighted);
-      for (let p = clamped.start.page; p <= clamped.end.page; p++) {
-        pagesToNotify.add(p);
-      }
-      pagesToNotify.forEach((p) => this.notifyPage(documentId, p));
+        // Notify the union of previously-highlighted pages and the new range so
+        // deselected pages clear their rects and newly-selected pages paint.
+        const pagesToNotify = new Set<number>(previouslyHighlighted);
+        for (let p = clamped.start.page; p <= clamped.end.page; p++) {
+          pagesToNotify.add(p);
+        }
+        pagesToNotify.forEach((p) => this.notifyPage(documentId, p));
 
-      this.recalculateMenuPlacement(documentId);
+        this.recalculateMenuPlacement(documentId);
 
-      result.resolve(undefined);
-    }, (error) => result.reject(error.reason));
+        result.resolve(undefined);
+      },
+      (error) => result.reject(error.reason),
+    );
 
     return result;
   }
@@ -922,7 +996,10 @@ export class SelectionPlugin extends BasePlugin<
       Number.isInteger((g as GlyphPointer).index);
 
     if (!range || typeof range !== 'object' || !range.start || !range.end) {
-      return { code: PdfErrorCode.Unknown, message: 'Invalid selection range: expected { start, end }' };
+      return {
+        code: PdfErrorCode.Unknown,
+        message: 'Invalid selection range: expected { start, end }',
+      };
     }
     if (!isValidPointer(range.start) || !isValidPointer(range.end)) {
       return {
@@ -931,7 +1008,10 @@ export class SelectionPlugin extends BasePlugin<
       };
     }
     if (range.start.index < 0 || range.end.index < 0) {
-      return { code: PdfErrorCode.Unknown, message: 'Invalid selection range: glyph index cannot be negative' };
+      return {
+        code: PdfErrorCode.Unknown,
+        message: 'Invalid selection range: glyph index cannot be negative',
+      };
     }
 
     const pageCount = this.getCoreDocument(documentId)?.document?.pageCount ?? 0;
@@ -952,10 +1032,7 @@ export class SelectionPlugin extends BasePlugin<
    * available on the corresponding pages. Returns null when none of the
    * spanned pages have any text geometry to select.
    */
-  private clampRangeToGeometry(
-    documentId: string,
-    range: SelectionRangeX,
-  ): SelectionRangeX | null {
+  private clampRangeToGeometry(documentId: string, range: SelectionRangeX): SelectionRangeX | null {
     const docState = this.getDocumentState(documentId);
 
     const lastGlyphIndex = (page: number): number => {
@@ -983,8 +1060,7 @@ export class SelectionPlugin extends BasePlugin<
   /** Order a range so that `start` never comes after `end`. */
   private normalizeRange(range: SelectionRangeX): SelectionRangeX {
     const { start, end } = range;
-    const forward =
-      end.page > start.page || (end.page === start.page && end.index >= start.index);
+    const forward = end.page > start.page || (end.page === start.page && end.index >= start.index);
     return forward ? { start, end } : { start: end, end: start };
   }
 
@@ -1019,13 +1095,16 @@ export class SelectionPlugin extends BasePlugin<
     to: number,
     modeId: string,
   ) {
+    const previouslyHighlighted = Object.keys(this.getDocumentState(documentId).rects).map(Number);
     const range: SelectionRangeX = {
       start: { page, index: from },
       end: { page, index: to },
     };
 
+    this.stopWatchingRelease(documentId);
     this.selecting.set(documentId, false);
     this.anchor.set(documentId, undefined);
+    this.selectionPointerId.delete(documentId);
     this.dispatch(startSelection(documentId));
     this.dispatch(setSelection(documentId, range));
     this.updateRectsAndSlices(documentId, range);
@@ -1035,14 +1114,20 @@ export class SelectionPlugin extends BasePlugin<
     this.beginSelection$.emit(documentId, { page, index: from, modeId });
     this.endSelection$.emit(documentId, { modeId });
 
+    const pagesToNotify = new Set(previouslyHighlighted);
     for (let p = range.start.page; p <= range.end.page; p++) {
-      this.notifyPage(documentId, p);
+      pagesToNotify.add(p);
+    }
+    for (const pageIndex of pagesToNotify) {
+      this.notifyPage(documentId, pageIndex);
     }
     this.recalculateMenuPlacement(documentId);
   }
 
   private updateSelection(documentId: string, page: number, index: number, modeId: string) {
     if (!this.selecting.get(documentId) || !this.anchor.get(documentId)) return;
+
+    const previouslyHighlighted = Object.keys(this.getDocumentState(documentId).rects).map(Number);
 
     const a = this.anchor.get(documentId)!;
     const forward = page > a.page || (page === a.page && index >= a.index);
@@ -1055,9 +1140,14 @@ export class SelectionPlugin extends BasePlugin<
     this.updateRectsAndSlices(documentId, range);
     this.selChange$.emit(documentId, range);
 
-    // Notify affected pages
+    // A page that just left the range still renders its previous callback data
+    // until it is notified with an empty rect list.
+    const pagesToNotify = new Set(previouslyHighlighted);
     for (let p = range.start.page; p <= range.end.page; p++) {
-      this.notifyPage(documentId, p);
+      pagesToNotify.add(p);
+    }
+    for (const pageIndex of pagesToNotify) {
+      this.notifyPage(documentId, pageIndex);
     }
   }
 

@@ -2333,49 +2333,6 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
 
-  viewers/headless-vue:
-    dependencies:
-      '@embedpdf/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@embedpdf/engines':
-        specifier: workspace:*
-        version: link:../../packages/engines
-      '@embedpdf/plugin-document-manager':
-        specifier: workspace:*
-        version: link:../../packages/plugin-document-manager
-      '@embedpdf/plugin-interaction-manager':
-        specifier: workspace:*
-        version: link:../../packages/plugin-interaction-manager
-      '@embedpdf/plugin-render':
-        specifier: workspace:*
-        version: link:../../packages/plugin-render
-      '@embedpdf/plugin-rotate':
-        specifier: workspace:*
-        version: link:../../packages/plugin-rotate
-      '@embedpdf/plugin-scroll':
-        specifier: workspace:*
-        version: link:../../packages/plugin-scroll
-      '@embedpdf/plugin-selection':
-        specifier: workspace:*
-        version: link:../../packages/plugin-selection
-      '@embedpdf/plugin-viewport':
-        specifier: workspace:*
-        version: link:../../packages/plugin-viewport
-      '@embedpdf/plugin-zoom':
-        specifier: workspace:*
-        version: link:../../packages/plugin-zoom
-      vue:
-        specifier: '>=3.2.0'
-        version: 3.5.28(typescript@5.9.3)
-    devDependencies:
-      typescript:
-        specifier: ^5.0.0
-        version: 5.9.3
-      vite:
-        specifier: ^6.3.5
-        version: 6.4.1(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(sass-embedded@1.97.3)(sass@1.97.3)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
-
   viewers/react:
     dependencies:
       '@embedpdf/snippet':

@@ -1,8 +1,10 @@
 import { h, Fragment } from 'preact';
 import type { JSX } from 'preact';
 import { useEffect, useMemo } from 'preact/hooks';
+import { ReadOnlyAnnotationLayer } from './read-only-annotation-layer';
 import styles from '../styles/index.css';
 import { EmbedPDF } from '@embedpdf/core/preact';
+import { boundedPreviewScale } from './preview-raster';
 import { createPluginRegistration, PluginRegistry, PermissionConfig } from '@embedpdf/core';
 import { usePdfiumEngine } from '@embedpdf/engines/preact';
 import type { FontFallbackConfig } from '@embedpdf/engines';
@@ -62,6 +64,7 @@ import {
   SelectionLayer,
   SelectionPluginPackage,
   SelectionPluginConfig,
+  TextSelectionStyle,
 } from '@embedpdf/plugin-selection/preact';
 import {
   TilingLayer,
@@ -221,7 +224,26 @@ export interface SnippetFontsConfig {
   signature?: SnippetSignatureFontConfig | null;
 }
 
+import { HostedToolbar, type HostedToolbarSource } from './hosted-toolbar';
+
 export interface PDFViewerConfig {
+  textSelectionStyle?: TextSelectionStyle;
+  toolbarPlacement?: 'viewer' | 'host';
+  hostedToolbar?: HostedToolbarSource;
+  /** Static preview: no PDF mutations, form interaction, export or standalone file actions. */
+  readOnly?: boolean;
+  /** URI navigation from either page links or document outlines. */
+  // eslint-disable-next-line no-unused-vars -- Parameter belongs to a public TypeScript callback signature.
+  onNavigate?: (uri: string) => void;
+  onUnsupportedNavigate?: () => void;
+  /** Page raster settled (or failed), for host loading/error UI. */
+  // eslint-disable-next-line no-unused-vars -- Parameter belongs to a public TypeScript callback signature.
+  onPageRender?: (event: {
+    documentId: string;
+    pageIndex: number;
+    error?: string;
+    errorCode?: number;
+  }) => void;
   // === Document Source (optional) ===
   /** URL or path to the PDF document. If not provided, viewer loads with no document. */
   src?: string;
@@ -440,6 +462,8 @@ const DEFAULTS = {
 interface PDFViewerProps {
   config: PDFViewerConfig;
   onRegistryReady?: (registry: PluginRegistry) => void;
+  // eslint-disable-next-line no-unused-vars -- Parameter belongs to a public TypeScript callback signature.
+  onError?: (error: Error) => void;
 }
 
 // Removed: menuItems and components are now in config files
@@ -451,9 +475,10 @@ interface PDFViewerProps {
 interface ViewerLayoutProps {
   documentId: string;
   tabBarVisibility?: TabBarVisibility;
+  config: PDFViewerConfig;
 }
 
-function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayoutProps) {
+function ViewerLayout({ documentId, tabBarVisibility = 'multiple', config }: ViewerLayoutProps) {
   const { renderToolbar, renderSidebar, renderModal, renderOverlays } =
     useSchemaRenderer(documentId);
   const { translate } = useTranslations(documentId);
@@ -477,7 +502,11 @@ function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayou
       />
 
       {/* Main Toolbar */}
-      {renderToolbar('top', 'main')}
+      {config.toolbarPlacement === 'host' && config.hostedToolbar ? (
+        <HostedToolbar source={config.hostedToolbar} documentId={documentId} />
+      ) : (
+        renderToolbar('top', 'main')
+      )}
 
       {/* Secondary Toolbar (annotation/redaction/shapes) */}
       {renderToolbar('top', 'secondary')}
@@ -501,7 +530,11 @@ function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayou
                 {isLoaded && (
                   <div className="relative h-full w-full">
                     <GlobalPointerProvider documentId={documentId}>
-                      <Viewport className="bg-bg-app" documentId={documentId}>
+                      <Viewport
+                        className="bg-bg-app"
+                        documentId={documentId}
+                        data-embedpdf-viewport
+                      >
                         <ZoomGestureWrapper documentId={documentId}>
                           <Scroller
                             documentId={documentId}
@@ -511,37 +544,82 @@ function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayou
                                 pageIndex={pageIndex}
                                 style={{ backgroundColor: '#fff' }}
                               >
-                                <PagePointerProvider documentId={documentId} pageIndex={pageIndex}>
+                                <PagePointerProvider
+                                  documentId={documentId}
+                                  pageIndex={pageIndex}
+                                  data-embedpdf-page-index={pageIndex}
+                                >
                                   <RenderLayer
                                     documentId={documentId}
                                     pageIndex={pageIndex}
-                                    scale={0.5}
+                                    scale={
+                                      config.readOnly
+                                        ? boundedPreviewScale(
+                                            documentState?.document?.pages[pageIndex]?.size.width ??
+                                              612,
+                                            documentState?.document?.pages[pageIndex]?.size
+                                              .height ?? 792,
+                                            globalThis.devicePixelRatio,
+                                          )
+                                        : 0.5
+                                    }
                                     style={{ pointerEvents: 'none' }}
+                                    onRendered={() =>
+                                      config.onPageRender?.({ documentId, pageIndex })
+                                    }
+                                    onRenderError={(error, errorCode) =>
+                                      config.onPageRender?.({
+                                        documentId,
+                                        pageIndex,
+                                        error,
+                                        errorCode,
+                                      })
+                                    }
                                   />
                                   <TilingLayer
                                     documentId={documentId}
                                     pageIndex={pageIndex}
                                     style={{ pointerEvents: 'none' }}
+                                    onRenderError={(error, errorCode) =>
+                                      config.onPageRender?.({
+                                        documentId,
+                                        pageIndex,
+                                        error,
+                                        errorCode,
+                                      })
+                                    }
                                   />
                                   <SearchLayer documentId={documentId} pageIndex={pageIndex} />
                                   <MarqueeZoom documentId={documentId} pageIndex={pageIndex} />
-                                  <MarqueeCapture documentId={documentId} pageIndex={pageIndex} />
+                                  {!config.readOnly && (
+                                    <MarqueeCapture documentId={documentId} pageIndex={pageIndex} />
+                                  )}
                                   <SelectionLayer
+                                    textStyle={config.textSelectionStyle}
                                     documentId={documentId}
                                     pageIndex={pageIndex}
-                                    selectionMenu={selectionMenu}
+                                    selectionMenu={config.readOnly ? undefined : selectionMenu}
                                   />
-                                  <RedactionLayer
-                                    documentId={documentId}
-                                    pageIndex={pageIndex}
-                                    selectionMenu={redactionMenu}
-                                  />
-                                  <AnnotationLayer
-                                    documentId={documentId}
-                                    pageIndex={pageIndex}
-                                    selectionMenu={annotationMenu}
-                                    groupSelectionMenu={groupAnnotationMenu}
-                                  />
+                                  {!config.readOnly && (
+                                    <RedactionLayer
+                                      documentId={documentId}
+                                      pageIndex={pageIndex}
+                                      selectionMenu={redactionMenu}
+                                    />
+                                  )}
+                                  {config.readOnly ? (
+                                    <ReadOnlyAnnotationLayer
+                                      documentId={documentId}
+                                      pageIndex={pageIndex}
+                                    />
+                                  ) : (
+                                    <AnnotationLayer
+                                      documentId={documentId}
+                                      pageIndex={pageIndex}
+                                      selectionMenu={annotationMenu}
+                                      groupSelectionMenu={groupAnnotationMenu}
+                                    />
+                                  )}
                                 </PagePointerProvider>
                               </Rotate>
                             )}
@@ -570,13 +648,36 @@ function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayou
 
 const logger = new AllLogger([new ConsoleLogger(), new PerfLogger()]);
 
-export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
-  const { engine, isLoading } = usePdfiumEngine({
+export function PDFViewer({ config, onRegistryReady, onError }: PDFViewerProps) {
+  const { engine, isLoading, error } = usePdfiumEngine({
     ...(config.wasmUrl && { wasmUrl: config.wasmUrl }),
     ...(config.fontFallback !== undefined && { fontFallback: config.fontFallback }),
     worker: config.worker,
     logger: config.log ? logger : undefined,
   });
+  useEffect(() => {
+    if (error) onError?.(error);
+  }, [error, onError]);
+  const readOnlyDisabledCategories = config.readOnly
+    ? [
+        'document',
+        'panel-comment',
+        'panel-annotation-style',
+        'annotation',
+        'redaction',
+        'form',
+        'insert',
+        'history',
+        'document-open',
+        'document-close',
+        'document-export',
+        'document-print',
+        'document-protect',
+        'document-capture',
+        'document-fullscreen',
+        'security-unlock-overlay',
+      ]
+    : [];
 
   // Memoize UIProvider props to prevent unnecessary remounts
   const uiComponents: UIComponents = useMemo(
@@ -634,13 +735,25 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
     );
 
   return (
-    <div className="embedpdf-snippet-root" style={uiFontStyle}>
+    <div
+      className="embedpdf-snippet-root"
+      style={uiFontStyle}
+      tabIndex={-1}
+      onPointerDown={(event) => {
+        const target = event.target as Element;
+        if (!target.closest('button, input, select, textarea, a, [contenteditable="true"]')) {
+          event.currentTarget.focus({ preventScroll: true });
+        }
+      }}
+    >
       <style>{styles}</style>
       <EmbedPDF
         config={{
           logger: config.log ? logger : undefined,
           permissions: config.permissions,
+          readOnly: config.readOnly,
         }}
+        onError={onError}
         onInitialized={async (registry) => {
           // Call the callback if provided
           if (onRegistryReady && registry) {
@@ -658,15 +771,21 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
           createPluginRegistration(CommandsPluginPackage, {
             ...DEFAULTS.commands,
             // Use root disabledCategories as default, but allow plugin-specific override
-            ...(config.disabledCategories && { disabledCategories: config.disabledCategories }),
             ...config.commands,
+            disabledCategories: [
+              ...(config.commands?.disabledCategories ?? config.disabledCategories ?? []),
+              ...readOnlyDisabledCategories,
+            ],
           }),
           createPluginRegistration(I18nPluginPackage, { ...DEFAULTS.i18n, ...config.i18n }),
           createPluginRegistration(UIPluginPackage, {
             ...DEFAULTS.ui,
             // Use root disabledCategories as default, but allow plugin-specific override
-            ...(config.disabledCategories && { disabledCategories: config.disabledCategories }),
             ...config.ui,
+            disabledCategories: [
+              ...(config.ui?.disabledCategories ?? config.disabledCategories ?? []),
+              ...readOnlyDisabledCategories,
+            ],
           }),
 
           // Viewport & Navigation
@@ -684,7 +803,11 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
           createPluginRegistration(PanPluginPackage, { ...DEFAULTS.pan, ...config.pan }),
 
           // Rendering
-          createPluginRegistration(RenderPluginPackage, { ...DEFAULTS.render, ...config.render }),
+          createPluginRegistration(RenderPluginPackage, {
+            ...DEFAULTS.render,
+            ...config.render,
+            ...(config.readOnly ? { withForms: true, withAnnotations: true } : {}),
+          }),
           createPluginRegistration(TilingPluginPackage, { ...DEFAULTS.tiling, ...config.tiling }),
           createPluginRegistration(ThumbnailPluginPackage, {
             ...DEFAULTS.thumbnails,
@@ -695,8 +818,14 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
           createPluginRegistration(AnnotationPluginPackage, {
             ...DEFAULTS.annotations,
             ...config.annotations,
+            ...(config.readOnly ? { locked: { type: LockModeType.All } } : {}),
+            ...(config.onNavigate ? { autoOpenLinks: false } : {}),
           }),
-          createPluginRegistration(SearchPluginPackage, { ...DEFAULTS.search, ...config.search }),
+          createPluginRegistration(SearchPluginPackage, {
+            ...DEFAULTS.search,
+            ...config.search,
+            ...(config.readOnly ? { respectCopyPermission: true } : {}),
+          }),
           createPluginRegistration(SelectionPluginPackage, {
             ...DEFAULTS.selection,
             ...config.selection,
@@ -735,10 +864,16 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
             ...DEFAULTS.interactionManager,
             ...config.interactionManager,
           }),
-          createPluginRegistration(FormPluginPackage, { ...DEFAULTS.form, ...config.form }),
+          ...(!config.readOnly
+            ? [createPluginRegistration(FormPluginPackage, { ...DEFAULTS.form, ...config.form })]
+            : []),
 
           // Stamps
-          createPluginRegistration(StampPluginPackage, { ...DEFAULTS.stamp, ...config.stamp }),
+          createPluginRegistration(StampPluginPackage, {
+            ...DEFAULTS.stamp,
+            ...config.stamp,
+            ...(config.readOnly ? { manifests: [] } : {}),
+          }),
 
           // Signatures
           createPluginRegistration(SignaturePluginPackage, {
@@ -754,6 +889,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
                 {activeDocumentId ? (
                   <SnippetConfigProvider config={config}>
                     <UIProvider
+                      renderMenus={config.toolbarPlacement !== 'host'}
                       documentId={activeDocumentId}
                       components={uiComponents}
                       renderers={uiRenderers}
@@ -761,9 +897,10 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
                     >
                       <ViewerLayout
                         documentId={activeDocumentId}
-                        tabBarVisibility={config.tabBar}
+                        tabBarVisibility={config.readOnly ? 'never' : config.tabBar}
+                        config={config}
                       />
-                      <Capture documentId={activeDocumentId} />
+                      {!config.readOnly && <Capture documentId={activeDocumentId} />}
                       <HintLayer documentId={activeDocumentId} />
                     </UIProvider>
                   </SnippetConfigProvider>

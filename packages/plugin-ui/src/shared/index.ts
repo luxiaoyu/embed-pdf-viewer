@@ -13,3 +13,6 @@ export * from './types';
 
 // Re-export plugin and schema types
 export * from '@embedpdf/plugin-ui';
+
+export { UIRoot } from './root';
+export { AutoMenuRenderer } from './auto-menu-renderer';

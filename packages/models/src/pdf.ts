@@ -93,6 +93,8 @@ export interface PdfPageObjectWithRotatedSize extends PdfPageObject {
  * @public
  */
 export interface PdfDocumentObject {
+  /** PDFium form type: 0 none, 1 AcroForm, 2 full XFA, 3 foreground/mixed XFA. */
+  formType?: 0 | 1 | 2 | 3;
   /**
    * Identity of document
    */
@@ -3169,6 +3171,8 @@ export interface PdfOpenDocumentBufferOptions {
 }
 
 export interface PdfRequestOptions {
+  /** Cancel an in-flight full-file request when its document is closed. */
+  signal?: AbortSignal;
   /**
    * Custom HTTP headers to include in all requests (HEAD, GET, range requests)
    * Example: { 'Authorization': 'Bearer token', 'X-Custom-Header': 'value' }

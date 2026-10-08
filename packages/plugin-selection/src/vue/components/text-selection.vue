@@ -126,29 +126,40 @@ const renderSelectionMenu = (rect: Rect, menuWrapperProps: MenuWrapperProps): VN
 <template>
   <template v-if="boundingRect">
     <div
+      data-embedpdf-text-selection-clip=""
       :style="{
         position: 'absolute',
-        left: `${boundingRect.origin.x * actualScale}px`,
-        top: `${boundingRect.origin.y * actualScale}px`,
-        width: `${boundingRect.size.width * actualScale}px`,
-        height: `${boundingRect.size.height * actualScale}px`,
-        mixBlendMode: 'multiply',
-        isolation: 'isolate',
+        inset: 0,
+        overflow: 'hidden',
         pointerEvents: 'none',
       }"
     >
       <div
-        v-for="(rect, i) in rects"
-        :key="i"
         :style="{
           position: 'absolute',
-          left: `${(rect.origin.x - boundingRect.origin.x) * actualScale}px`,
-          top: `${(rect.origin.y - boundingRect.origin.y) * actualScale}px`,
-          width: `${rect.size.width * actualScale}px`,
-          height: `${rect.size.height * actualScale}px`,
-          background: background,
+          left: `${boundingRect.origin.x * actualScale}px`,
+          top: `${boundingRect.origin.y * actualScale}px`,
+          width: `${boundingRect.size.width * actualScale}px`,
+          height: `${boundingRect.size.height * actualScale}px`,
+          mixBlendMode: 'multiply',
+          isolation: 'isolate',
+          pointerEvents: 'none',
         }"
-      />
+      >
+        <div
+          v-for="(rect, i) in rects"
+          :key="i"
+          data-embedpdf-text-selection=""
+          :style="{
+            position: 'absolute',
+            left: `${(rect.origin.x - boundingRect.origin.x) * actualScale}px`,
+            top: `${(rect.origin.y - boundingRect.origin.y) * actualScale}px`,
+            width: `${rect.size.width * actualScale}px`,
+            height: `${rect.size.height * actualScale}px`,
+            background: background,
+          }"
+        />
+      </div>
     </div>
 
     <!-- Selection Menu: Supports BOTH render function and slot -->

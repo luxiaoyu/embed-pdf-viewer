@@ -1526,18 +1526,18 @@ export const viewerUISchema: UISchema = {
         type: 'tabs',
         tabs: [
           {
-            id: 'thumbnails',
-            labelKey: 'panel.thumbnails',
-            label: 'Thumbnails',
-            icon: 'squares',
-            componentId: 'thumbnails-sidebar',
-          },
-          {
             id: 'outline',
             labelKey: 'panel.outline',
             label: 'Outline',
             icon: 'listTree',
             componentId: 'outline-sidebar',
+          },
+          {
+            id: 'thumbnails',
+            labelKey: 'panel.thumbnails',
+            label: 'Thumbnails',
+            icon: 'squares',
+            componentId: 'thumbnails-sidebar',
           },
         ],
       },

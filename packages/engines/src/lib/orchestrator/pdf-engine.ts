@@ -91,6 +91,9 @@ export class PdfEngine<T = Blob> implements IPdfEngine<T> {
   private workerQueue: WorkerTaskQueue;
   private logger: Logger;
   private options: PdfEngineOptions<T>;
+  private pendingUrlLoads = new Map<string, AbortController>();
+  private urlTasks = new Map<string, Task<PdfDocumentObject, PdfErrorReason>>();
+  private destroyed = false;
 
   constructor(executor: IPdfiumExecutor, options: PdfEngineOptions<T>) {
     this.executor = executor;
@@ -141,6 +144,12 @@ export class PdfEngine<T = Blob> implements IPdfEngine<T> {
   destroy(): PdfTask<boolean> {
     const task = new Task<boolean, PdfErrorReason>();
     try {
+      this.destroyed = true;
+      for (const task of this.urlTasks.values())
+        task.abort({ code: PdfErrorCode.Cancelled, message: 'Engine destroyed' });
+      this.urlTasks.clear();
+      for (const controller of this.pendingUrlLoads.values()) controller.abort();
+      this.pendingUrlLoads.clear();
       this.executor.destroy();
       // Clean up image converter resources (e.g., encoder worker pool)
       this.options.imageConverter.destroy?.();
@@ -156,6 +165,21 @@ export class PdfEngine<T = Blob> implements IPdfEngine<T> {
     options?: PdfOpenDocumentUrlOptions,
   ): PdfTask<PdfDocumentObject> {
     const task = new Task<PdfDocumentObject, PdfErrorReason>();
+    const controller = new AbortController();
+    this.urlTasks.get(file.id)?.abort({ code: PdfErrorCode.Cancelled, message: 'Load replaced' });
+    this.urlTasks.set(file.id, task);
+    this.pendingUrlLoads.get(file.id)?.abort();
+    this.pendingUrlLoads.set(file.id, controller);
+    const abort = task.abort.bind(task);
+    task.abort = (reason) => {
+      controller.abort();
+      abort(reason);
+    };
+    const externalSignal = options?.requestOptions?.signal;
+    const cancel = () =>
+      task.abort({ code: PdfErrorCode.Cancelled, message: 'Document load cancelled' });
+    externalSignal?.addEventListener('abort', cancel, { once: true });
+    if (externalSignal?.aborted || this.destroyed) cancel();
 
     // Handle fetch in main thread (not worker!)
     (async () => {
@@ -164,8 +188,20 @@ export class PdfEngine<T = Blob> implements IPdfEngine<T> {
           throw new Error('Fetcher is not set');
         }
 
-        const response = await this.options.fetcher(file.url, options?.requestOptions);
+        if (controller.signal.aborted) return;
+        const response = await this.options.fetcher(file.url, {
+          ...options?.requestOptions,
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          task.reject({
+            code: response.status === 404 ? PdfErrorCode.NotFound : PdfErrorCode.LoadDoc,
+            message: `PDF request failed: ${response.status}`,
+          });
+          return;
+        }
         const arrayBuf = await response.arrayBuffer();
+        if (controller.signal.aborted || this.destroyed) return;
 
         const pdfFile: PdfFile = {
           id: file.id,
@@ -177,12 +213,22 @@ export class PdfEngine<T = Blob> implements IPdfEngine<T> {
           password: options?.password,
           normalizeRotation: options?.normalizeRotation,
         }).wait(
-          (doc) => task.resolve(doc),
+          (doc) => {
+            if (controller.signal.aborted || this.destroyed) {
+              this.closeDocument(doc);
+              return;
+            }
+            task.resolve(doc);
+          },
           (error) => task.fail(error),
         );
       } catch (error) {
         // This only catches fetch errors (network issues, etc.)
         task.reject({ code: PdfErrorCode.Unknown, message: String(error) });
+      } finally {
+        externalSignal?.removeEventListener('abort', cancel);
+        if (this.pendingUrlLoads.get(file.id) === controller) this.pendingUrlLoads.delete(file.id);
+        if (this.urlTasks.get(file.id) === task) this.urlTasks.delete(file.id);
       }
     })();
 

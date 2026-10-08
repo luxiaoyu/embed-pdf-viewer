@@ -19,6 +19,8 @@ export interface BasePluginConfig {
 }
 
 export interface PluginRegistryConfig {
+  /** Reject all engine mutations and exports, including direct registry calls. */
+  readOnly?: boolean;
   defaultRotation?: Rotation;
   defaultScale?: number;
   logger?: Logger;

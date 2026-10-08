@@ -60,6 +60,8 @@ export class DocumentManagerPlugin extends BasePlugin<
   private maxDocuments?: number;
 
   private loadOptions = new Map<string, LoadDocumentUrlOptions | LoadDocumentBufferOptions>();
+  private loadTasks = new Map<string, Task<PdfDocumentObject, PdfErrorReason>>();
+  private disposing = false;
 
   constructor(
     public readonly id: string,
@@ -410,6 +412,9 @@ export class DocumentManagerPlugin extends BasePlugin<
 
   private closeDocument(documentId: string): Task<void, PdfErrorReason> {
     const task = new Task<void, PdfErrorReason>();
+    const loading = this.loadTasks.get(documentId);
+    this.loadTasks.delete(documentId);
+    loading?.abort({ code: PdfErrorCode.Cancelled, message: 'Document closed while loading' });
 
     const docState = this.coreState.core.documents[documentId];
     if (!docState) {
@@ -727,11 +732,26 @@ export class DocumentManagerPlugin extends BasePlugin<
     engineTask: Task<PdfDocumentObject, PdfErrorReason>,
     context: string,
   ): void {
+    this.loadTasks
+      .get(documentId)
+      ?.abort({ code: PdfErrorCode.Cancelled, message: 'Load replaced' });
+    this.loadTasks.set(documentId, engineTask);
     engineTask.wait(
       (pdfDocument) => {
+        if (
+          this.disposing ||
+          this.loadTasks.get(documentId) !== engineTask ||
+          !this.coreState.core.documents[documentId]
+        ) {
+          this.engine.closeDocument(pdfDocument);
+          return;
+        }
+        this.loadTasks.delete(documentId);
         this.dispatchCoreAction(setDocumentLoaded(documentId, pdfDocument));
       },
       (error) => {
+        if (this.disposing || this.loadTasks.get(documentId) !== engineTask) return;
+        this.loadTasks.delete(documentId);
         this.handleLoadError(documentId, error, context);
       },
     );
@@ -810,6 +830,10 @@ export class DocumentManagerPlugin extends BasePlugin<
   }
 
   async destroy(): Promise<void> {
+    this.disposing = true;
+    for (const task of this.loadTasks.values())
+      task.abort({ code: PdfErrorCode.Cancelled, message: 'Viewer destroyed' });
+    this.loadTasks.clear();
     // Close all documents
     await this.closeAllDocuments().toPromise();
 

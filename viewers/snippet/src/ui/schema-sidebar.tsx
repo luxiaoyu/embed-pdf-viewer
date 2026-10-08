@@ -2,6 +2,7 @@ import { h, Fragment } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
 import { SidebarRendererProps, useItemRenderer, useUIContainer } from '@embedpdf/plugin-ui/preact';
+import { useTranslations } from '@embedpdf/plugin-i18n/preact';
 import { Icon } from '@/components/ui/icon';
 
 // Drawer snap points as percentages
@@ -96,6 +97,7 @@ export function SchemaSidebar({
       className={`${positionClasses} border-border-default bg-bg-surface flex flex-col shadow-lg`}
       style={widthStyle}
       data-sidebar-id={schema.id}
+      data-sidebar-presentation="sidebar"
     >
       {/* Sidebar Content */}
       <div className="min-h-0 flex-1">
@@ -391,6 +393,7 @@ function BottomDrawer({
         }`}
         style={{ height: `${displayHeight}%` }}
         data-sidebar-id={schema.id}
+        data-sidebar-presentation="drawer"
       >
         {/* Drag Handle */}
         <div
@@ -433,7 +436,9 @@ function TabsContent({
   documentId: string;
   renderCustomComponent: (componentId: string, documentId: string, props: any) => any;
 }) {
+  const { translate } = useTranslations(documentId);
   const [activeTab, setActiveTab] = useState(content.tabs[0]?.id || '');
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([activeTab]));
 
   return (
     <div className="flex h-full flex-1 flex-col">
@@ -448,9 +453,13 @@ function TabsContent({
             <button
               key={tab.id}
               role="tab"
+              aria-label={tab.labelKey ? translate(tab.labelKey) : tab.label}
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setVisitedTabs((visited) => new Set([...visited, tab.id]));
+                setActiveTab(tab.id);
+              }}
               className={`relative flex h-7 flex-1 cursor-pointer items-center justify-center border outline-none transition-colors ${
                 isFirst ? 'rounded-l-md' : ''
               } ${isLast ? 'rounded-r-md' : ''} ${!isLast ? 'border-r-0' : ''} ${
@@ -466,13 +475,23 @@ function TabsContent({
       </div>
 
       {/* Tab Content */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="relative min-h-0 flex-1">
         {content.tabs
-          .filter((tab) => tab.id === activeTab)
+          .filter((tab) => visitedTabs.has(tab.id))
           .map((tab) => (
-            <Fragment key={tab.id}>
-              {renderCustomComponent(tab.componentId, documentId, {})}
-            </Fragment>
+            <div
+              key={tab.id}
+              role="tabpanel"
+              aria-label={tab.labelKey ? translate(tab.labelKey) : tab.label}
+              aria-hidden={activeTab !== tab.id}
+              data-sidebar-tab={tab.id}
+              className="absolute inset-0 overflow-auto"
+              // Preserve viewport dimensions while hidden so virtual thumbnails
+              // keep their window and cached image nodes instead of seeing a zero resize.
+              style={{ visibility: activeTab === tab.id ? 'visible' : 'hidden' }}
+            >
+              {renderCustomComponent(tab.componentId, documentId, { active: activeTab === tab.id })}
+            </div>
           ))}
       </div>
     </div>

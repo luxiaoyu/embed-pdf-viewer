@@ -1,5 +1,5 @@
 import { useEffect } from '@framework';
-import { useCommandsCapability } from '../hooks';
+import { useCommandsCapability, useCommandsPlugin } from '../hooks';
 import { createKeyDownHandler } from '../utils';
 
 /**
@@ -9,15 +9,19 @@ import { createKeyDownHandler } from '../utils';
  */
 export function KeyboardShortcuts() {
   const { provides: commands } = useCommandsCapability();
+  const { plugin } = useCommandsPlugin();
 
   useEffect(() => {
     if (!commands) return;
 
-    const handleKeyDown = createKeyDownHandler(commands);
+    const handler = createKeyDownHandler(commands);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (plugin?.shouldHandleShortcut(event)) handler(event);
+    };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [commands]);
+  }, [commands, plugin]);
 
   // This component is only used to set up keyboard shortcuts when the plugin is initialized.
   return null;

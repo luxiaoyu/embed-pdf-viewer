@@ -291,6 +291,7 @@ function MobileMenu({
         className={`bg-bg-overlay absolute inset-0 z-40 transition-opacity duration-300 ${
           isAnimatingIn ? 'opacity-100' : 'opacity-0'
         }`}
+        style={{ pointerEvents: 'auto' }}
         onClick={closeWithAnimation}
       />
 
@@ -301,6 +302,7 @@ function MobileMenu({
           !dragState.current.isDragging ? 'transition-transform duration-300 ease-out' : ''
         }`}
         style={{
+          pointerEvents: 'auto',
           maxHeight: '80%',
           transform: `translateY(${translateY}px)`,
         }}
@@ -435,6 +437,7 @@ function DesktopMenu({
         top: `${position.top}px`,
         left: `${position.left}px`,
         zIndex: 1000,
+        pointerEvents: 'auto' as const,
       }
     : { display: 'none' };
 

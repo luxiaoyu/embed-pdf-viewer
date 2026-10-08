@@ -56,6 +56,18 @@ export function getEffectivePermission(
   documentId: string,
   flag: PdfPermissionFlag,
 ): boolean {
+  if (
+    state.readOnly &&
+    [
+      PdfPermissionFlag.ModifyContents,
+      PdfPermissionFlag.ModifyAnnotations,
+      PdfPermissionFlag.FillForms,
+      PdfPermissionFlag.AssembleDocument,
+      PdfPermissionFlag.Print,
+      PdfPermissionFlag.PrintHighQuality,
+    ].includes(flag)
+  )
+    return false;
   const docState = state.documents[documentId];
   const docConfig = docState?.permissions;
   const globalConfig = state.globalPermissions;

@@ -141,26 +141,35 @@
 {#if boundingRect}
   <!-- Highlight layer -->
   <div
+    data-embedpdf-text-selection-clip=""
     style:position="absolute"
-    style:left={`${boundingRect.origin.x * actualScale}px`}
-    style:top={`${boundingRect.origin.y * actualScale}px`}
-    style:width={`${boundingRect.size.width * actualScale}px`}
-    style:height={`${boundingRect.size.height * actualScale}px`}
-    style:mix-blend-mode="multiply"
-    style:isolation="isolate"
+    style:inset="0"
+    style:overflow="hidden"
     style:pointer-events="none"
   >
-    {#each rects as rect, i (i)}
-      <div
-        style:position="absolute"
-        style:left={`${(rect.origin.x - boundingRect.origin.x) * actualScale}px`}
-        style:top={`${(rect.origin.y - boundingRect.origin.y) * actualScale}px`}
-        style:width={`${rect.size.width * actualScale}px`}
-        style:height={`${rect.size.height * actualScale}px`}
-        style:background
-        style:pointer-events="none"
-      ></div>
-    {/each}
+    <div
+      style:position="absolute"
+      style:left={`${boundingRect.origin.x * actualScale}px`}
+      style:top={`${boundingRect.origin.y * actualScale}px`}
+      style:width={`${boundingRect.size.width * actualScale}px`}
+      style:height={`${boundingRect.size.height * actualScale}px`}
+      style:mix-blend-mode="multiply"
+      style:isolation="isolate"
+      style:pointer-events="none"
+    >
+      {#each rects as rect, i (i)}
+        <div
+          data-embedpdf-text-selection=""
+          style:position="absolute"
+          style:left={`${(rect.origin.x - boundingRect.origin.x) * actualScale}px`}
+          style:top={`${(rect.origin.y - boundingRect.origin.y) * actualScale}px`}
+          style:width={`${rect.size.width * actualScale}px`}
+          style:height={`${rect.size.height * actualScale}px`}
+          style:background
+          style:pointer-events="none"
+        ></div>
+      {/each}
+    </div>
   </div>
 
   <!-- Selection menu (counter-rotated) -->

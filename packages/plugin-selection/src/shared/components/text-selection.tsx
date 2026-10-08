@@ -84,30 +84,41 @@ export function TextSelection({
   return (
     <>
       <div
+        data-embedpdf-text-selection-clip=""
         style={{
           position: 'absolute',
-          left: boundingRect.origin.x * actualScale,
-          top: boundingRect.origin.y * actualScale,
-          width: boundingRect.size.width * actualScale,
-          height: boundingRect.size.height * actualScale,
-          mixBlendMode: 'multiply',
-          isolation: 'isolate',
+          inset: 0,
+          overflow: 'hidden',
           pointerEvents: 'none',
         }}
       >
-        {rects.map((b, i) => (
-          <div
-            key={i}
-            style={{
-              position: 'absolute',
-              left: (b.origin.x - boundingRect.origin.x) * actualScale,
-              top: (b.origin.y - boundingRect.origin.y) * actualScale,
-              width: b.size.width * actualScale,
-              height: b.size.height * actualScale,
-              background,
-            }}
-          />
-        ))}
+        <div
+          style={{
+            position: 'absolute',
+            left: boundingRect.origin.x * actualScale,
+            top: boundingRect.origin.y * actualScale,
+            width: boundingRect.size.width * actualScale,
+            height: boundingRect.size.height * actualScale,
+            mixBlendMode: 'multiply',
+            isolation: 'isolate',
+            pointerEvents: 'none',
+          }}
+        >
+          {rects.map((b, i) => (
+            <div
+              key={i}
+              data-embedpdf-text-selection=""
+              style={{
+                position: 'absolute',
+                left: (b.origin.x - boundingRect.origin.x) * actualScale,
+                top: (b.origin.y - boundingRect.origin.y) * actualScale,
+                width: b.size.width * actualScale,
+                height: b.size.height * actualScale,
+                background,
+              }}
+            />
+          ))}
+        </div>
       </div>
       {shouldRenderMenu && (
         <CounterRotate

@@ -30,7 +30,7 @@ export function useViewportRef(documentId: string) {
     container.addEventListener('scroll', onScroll);
 
     // On resize
-    const resizeObserver = new ResizeObserver(() => {
+    const updateSize = () => {
       viewportPlugin.setViewportResizeMetrics(documentId, {
         width: container.offsetWidth,
         height: container.offsetHeight,
@@ -43,8 +43,10 @@ export function useViewportRef(documentId: string) {
         clientLeft: container.clientLeft,
         clientTop: container.clientTop,
       });
-    });
+    };
+    const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(container);
+    const unsubscribeResume = viewportPlugin.onResume(documentId, updateSize);
 
     // Subscribe to scroll requests for this document
     const unsubscribeScrollRequest = viewportPlugin.onScrollRequest(
@@ -62,6 +64,7 @@ export function useViewportRef(documentId: string) {
       resizeObserver.disconnect();
       container.removeEventListener('scroll', onScroll);
       unsubscribeScrollRequest();
+      unsubscribeResume();
     };
   }, [viewportPlugin, documentId]);
 

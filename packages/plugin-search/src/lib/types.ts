@@ -8,6 +8,7 @@ import {
 } from '@embedpdf/models';
 
 export interface SearchPluginConfig extends BasePluginConfig {
+  respectCopyPermission?: boolean;
   flags?: MatchFlag[];
   /**
    * Whether to show all search results or only the active one

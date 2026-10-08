@@ -15,12 +15,15 @@ import { useDocumentState } from '@embedpdf/core/preact';
 import { Icon } from './ui/icon';
 import { ChevronDownIcon } from './icons/chevron-down';
 import { ChevronRightIcon } from './icons/chevron-right';
+import { useSnippetConfig } from './snippet-config-context';
+import { isSafePreviewUri } from './navigation-policy';
 
 type OutlineSidebarProps = {
   documentId: string;
 };
 
 export function OutlineSidebar({ documentId }: OutlineSidebarProps) {
+  const config = useSnippetConfig();
   const { provides: bookmark } = useBookmarkCapability();
   const { provides: scroll } = useScrollCapability();
   const { translate } = useTranslations(documentId);
@@ -63,11 +66,17 @@ export function OutlineSidebar({ documentId }: OutlineSidebarProps) {
 
     if (bookmark.target.type === 'action') {
       const action = bookmark.target.action;
+      if (config.readOnly && action.type === PdfActionType.RemoteGoto) {
+        config.onUnsupportedNavigate?.();
+        return;
+      }
       if (action.type === PdfActionType.Goto || action.type === PdfActionType.RemoteGoto) {
         destination = action.destination;
       } else if (action.type === PdfActionType.URI) {
+        if (config.readOnly && !isSafePreviewUri(action.uri)) return;
         // Open URI in new tab
-        window.open(action.uri, '_blank');
+        if (config.onNavigate) config.onNavigate(action.uri);
+        else window.open(action.uri, '_blank', 'noopener,noreferrer');
         return;
       }
       // Other action types (Unsupported, LaunchAppOrOpenFile) are not handled
@@ -75,7 +84,10 @@ export function OutlineSidebar({ documentId }: OutlineSidebarProps) {
       destination = bookmark.target.destination;
     }
 
-    if (!destination) return;
+    if (!destination) {
+      config.onUnsupportedNavigate?.();
+      return;
+    }
 
     if (destination.zoom.mode === PdfZoomMode.XYZ) {
       const page = documentState?.document?.pages.find((p) => p.index === destination.pageIndex);

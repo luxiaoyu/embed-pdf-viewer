@@ -41,6 +41,7 @@ export interface DocumentState {
 }
 
 export interface CoreState {
+  readOnly?: boolean;
   documents: Record<string, DocumentState>;
   documentOrder: string[];
   activeDocumentId: string | null;
@@ -51,6 +52,7 @@ export interface CoreState {
 }
 
 export const initialCoreState: (config?: PluginRegistryConfig) => CoreState = (config) => ({
+  readOnly: config?.readOnly === true,
   documents: {},
   documentOrder: [],
   activeDocumentId: null,

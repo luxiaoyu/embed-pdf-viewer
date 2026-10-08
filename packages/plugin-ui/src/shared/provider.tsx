@@ -35,6 +35,7 @@ export interface UIProviderProps extends HTMLAttributes<HTMLDivElement> {
    * Defaults to document.body
    */
   menuContainer?: HTMLElement | null;
+  renderMenus?: boolean;
 }
 
 /**
@@ -82,6 +83,7 @@ export function UIProvider({
   components = {},
   renderers,
   menuContainer,
+  renderMenus = true,
   ...restProps
 }: UIProviderProps) {
   return (
@@ -91,7 +93,7 @@ export function UIProvider({
           <UIRoot {...restProps}>
             {children}
             {/* Automatically render menus for this document */}
-            <AutoMenuRenderer documentId={documentId} container={menuContainer} />
+            {renderMenus && <AutoMenuRenderer documentId={documentId} container={menuContainer} />}
           </UIRoot>
         </RenderersProvider>
       </ComponentRegistryProvider>

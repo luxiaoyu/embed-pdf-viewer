@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, useMemo } from '@framework';
 import type { CSSProperties, HTMLAttributes } from '@framework';
 
-import { ignore, PdfErrorCode, Rotation } from '@embedpdf/models';
+import { PdfErrorCode } from '@embedpdf/models';
 
 import { useRenderCapability } from '../hooks/use-render';
 import { useDocumentState } from '@embedpdf/core/@framework';
@@ -27,6 +27,8 @@ type RenderLayerProps = Omit<HTMLAttributes<HTMLImageElement>, 'style'> & {
    * Additional styles for the image element
    */
   style?: CSSProperties;
+  onRendered?: () => void;
+  onRenderError?: (error: string, code?: number) => void;
 };
 
 /**
@@ -45,6 +47,8 @@ export function RenderLayer({
   scale: scaleOverride,
   dpr: dprOverride,
   style,
+  onRendered,
+  onRenderError,
   ...props
 }: RenderLayerProps) {
   const { provides: renderProvides } = useRenderCapability();
@@ -52,6 +56,8 @@ export function RenderLayer({
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
+  const callbacks = useRef({ onRendered, onRenderError });
+  callbacks.current = { onRendered, onRenderError };
 
   // Get refresh version from core state
   const refreshVersion = useMemo(() => {
@@ -72,6 +78,7 @@ export function RenderLayer({
 
   useEffect(() => {
     if (!renderProvides) return;
+    let disposed = false;
 
     const task = renderProvides.forDocument(documentId).renderPage({
       pageIndex,
@@ -81,13 +88,21 @@ export function RenderLayer({
       },
     });
 
-    task.wait((blob) => {
-      const url = URL.createObjectURL(blob);
-      setImageUrl(url);
-      urlRef.current = url;
-    }, ignore);
+    task.wait(
+      (blob) => {
+        if (disposed) return;
+        const url = URL.createObjectURL(blob);
+        setImageUrl(url);
+        urlRef.current = url;
+      },
+      (error) => {
+        if (!disposed && error.type !== 'abort')
+          callbacks.current.onRenderError?.(error.reason.message, error.reason.code);
+      },
+    );
 
     return () => {
+      disposed = true;
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current);
         urlRef.current = null;
@@ -105,6 +120,7 @@ export function RenderLayer({
       URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     }
+    callbacks.current.onRendered?.();
   };
 
   return (
@@ -113,6 +129,12 @@ export function RenderLayer({
         <img
           src={imageUrl}
           onLoad={handleImageLoad}
+          onError={() =>
+            callbacks.current.onRenderError?.(
+              'PDF raster image failed to decode',
+              PdfErrorCode.PageError,
+            )
+          }
           {...props}
           style={{
             width: '100%',

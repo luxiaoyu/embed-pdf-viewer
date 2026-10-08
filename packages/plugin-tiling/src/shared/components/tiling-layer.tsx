@@ -10,6 +10,7 @@ type TilingLayoutProps = Omit<HTMLAttributes<HTMLDivElement>, 'style'> & {
   pageIndex: number;
   scale?: number;
   style?: CSSProperties;
+  onRenderError?: (error: string, code?: number) => void;
 };
 
 export function TilingLayer({
@@ -17,6 +18,7 @@ export function TilingLayer({
   pageIndex,
   scale: scaleOverride,
   style,
+  onRenderError,
   ...props
 }: TilingLayoutProps) {
   const { provides: tilingProvides } = useTilingCapability();
@@ -53,6 +55,7 @@ export function TilingLayer({
           tile={tile}
           dpr={window.devicePixelRatio}
           scale={actualScale}
+          onRenderError={onRenderError}
         />
       ))}
     </div>

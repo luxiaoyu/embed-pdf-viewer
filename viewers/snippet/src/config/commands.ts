@@ -573,6 +573,8 @@ export const commands: Record<string, Command<State>> = {
     icon: 'search',
     shortcuts: ['Ctrl+F', 'Meta+F'],
     categories: ['panel', 'panel-search'],
+    disabled: ({ state, documentId }) =>
+      lacksPermission(state, documentId, PdfPermissionFlag.CopyContents),
     action: ({ registry, documentId }) => {
       const uiPlugin = registry.getPlugin<UIPlugin>(UI_PLUGIN_ID);
       if (!uiPlugin || !uiPlugin.provides) return;

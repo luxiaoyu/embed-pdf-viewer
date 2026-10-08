@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from '@framework';
-import { ignore, Logger, PdfEngine } from '@embedpdf/models';
+import { Logger, PdfEngine } from '@embedpdf/models';
 import type { FontFallbackConfig } from '@embedpdf/engines';
 
 const defaultWasmUrl = `https://cdn.jsdelivr.net/npm/@embedpdf/pdfium@__PDFIUM_VERSION__/dist/pdfium.wasm`;
@@ -44,6 +44,10 @@ export function usePdfiumEngine(config?: UsePdfiumEngineProps) {
           encoderPoolSize,
           fontFallback,
         });
+        if (cancelled) {
+          pdfEngine.destroy?.();
+          return;
+        }
         engineRef.current = pdfEngine;
         setEngine(pdfEngine);
         setLoading(false);
@@ -57,10 +61,8 @@ export function usePdfiumEngine(config?: UsePdfiumEngineProps) {
 
     return () => {
       cancelled = true;
-      engineRef.current?.closeAllDocuments?.().wait(() => {
-        engineRef.current?.destroy?.();
-        engineRef.current = null;
-      }, ignore);
+      engineRef.current?.destroy?.();
+      engineRef.current = null;
     };
   }, [wasmUrl, worker, logger, fontFallback]);
 

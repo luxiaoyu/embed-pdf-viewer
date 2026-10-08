@@ -270,6 +270,9 @@ export class PdfiumNative implements IPdfiumExecutor {
     this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'destroy');
     this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `Destroy`, 'Begin', 'General');
 
+    // Release page timers, document handles and file buffers while PDFium is still alive.
+    this.cache.closeAllDocuments();
+
     // Disable font fallback before destroying library
     if (this.fontFallbackManager) {
       this.fontFallbackManager.disable();
@@ -415,6 +418,7 @@ export class PdfiumNative implements IPdfiumExecutor {
 
     const pdfDoc: PdfDocumentObject = {
       id: file.id,
+      formType: this.pdfiumModule.FPDF_GetFormType(docPtr) as 0 | 1 | 2 | 3,
       pageCount,
       pages,
       isEncrypted,
@@ -10451,11 +10455,7 @@ export class PdfiumNative implements IPdfiumExecutor {
    *
    * @private
    */
-  private readPageBoxes(
-    docPtr: number,
-    index: number,
-    boxPtr: number,
-  ): PdfPageBoxes | undefined {
+  private readPageBoxes(docPtr: number, index: number, boxPtr: number): PdfPageBoxes | undefined {
     const readBox = (boxType: number): Box | undefined => {
       const ok = this.pdfiumModule.EPDF_GetPageBoxByIndex(docPtr, index, boxType, boxPtr);
       if (!ok) {

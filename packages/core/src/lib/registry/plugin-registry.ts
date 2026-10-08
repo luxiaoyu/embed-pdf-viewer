@@ -18,6 +18,7 @@ import { Logger, NoopLogger, PdfEngine } from '@embedpdf/models';
 import { Action, CoreState, Store, initialCoreState, Reducer } from '../store';
 import { CoreAction } from '../store/actions';
 import { coreReducer } from '../store/reducer';
+import { createReadOnlyEngine } from './read-only-engine';
 
 // Define a more flexible generic type for plugin registrations
 interface PluginRegistration {
@@ -48,7 +49,7 @@ export class PluginRegistry {
 
   constructor(engine: PdfEngine, config?: PluginRegistryConfig) {
     this.resolver = new DependencyResolver();
-    this.engine = engine;
+    this.engine = config?.readOnly ? createReadOnlyEngine(engine) : engine;
     this.initialCoreState = initialCoreState(config);
     this.store = new Store<CoreState, CoreAction>(coreReducer, this.initialCoreState);
     this.logger = config?.logger ?? new NoopLogger();

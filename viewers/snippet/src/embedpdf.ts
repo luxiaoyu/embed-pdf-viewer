@@ -1,5 +1,6 @@
 import { EmbedPdfContainer } from './web-components/container';
 import { PDFViewerConfig } from './components/app';
+export type * from './host-contract';
 
 // ============================================================================
 // Version

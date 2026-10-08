@@ -152,6 +152,7 @@ export class RemoteExecutor implements IPdfiumExecutor {
   private requestCounter = 0;
   private logger: Logger;
   private readyTask: Task<boolean, PdfErrorReason>;
+  private failedReason: PdfErrorReason | null = null;
 
   constructor(
     private worker: Worker,
@@ -159,6 +160,8 @@ export class RemoteExecutor implements IPdfiumExecutor {
   ) {
     this.logger = options.logger ?? new NoopLogger();
     this.worker.addEventListener('message', this.handleMessage);
+    this.worker.addEventListener('error', this.handleWorkerError);
+    this.worker.addEventListener('messageerror', this.handleWorkerError);
 
     // Create ready task - will be resolved when worker sends 'ready'
     this.readyTask = new Task<boolean, PdfErrorReason>();
@@ -190,6 +193,10 @@ export class RemoteExecutor implements IPdfiumExecutor {
   private send<T, P = unknown>(method: MessageType, args: any[]): Task<T, PdfErrorReason, P> {
     const id = this.generateId();
     const task = new Task<T, PdfErrorReason, P>();
+    if (this.failedReason) {
+      task.reject(this.failedReason);
+      return task;
+    }
 
     const request: WorkerRequest = {
       id,
@@ -203,7 +210,15 @@ export class RemoteExecutor implements IPdfiumExecutor {
       () => {
         this.pendingRequests.set(id, task);
         this.logger.debug(LOG_SOURCE, LOG_CATEGORY, `Sending ${method} request:`, id);
-        this.worker.postMessage(request);
+        try {
+          this.worker.postMessage(request);
+        } catch {
+          this.pendingRequests.delete(id);
+          task.reject({
+            code: PdfErrorCode.Initialization,
+            message: 'Worker request could not be sent',
+          });
+        }
       },
       (error) => {
         this.logger.error(
@@ -278,15 +293,23 @@ export class RemoteExecutor implements IPdfiumExecutor {
   /**
    * Cleanup and terminate worker
    */
+  private handleWorkerError = () => {
+    const reason = { code: PdfErrorCode.Initialization, message: 'PDFium worker failed' };
+    this.failedReason = reason;
+    for (const task of this.pendingRequests.values()) task.reject(reason);
+    this.pendingRequests.clear();
+  };
+
   destroy(): void {
+    this.failedReason = { code: PdfErrorCode.Cancelled, message: 'Worker destroyed' };
     this.worker.removeEventListener('message', this.handleMessage);
+    this.worker.removeEventListener('error', this.handleWorkerError);
+    this.worker.removeEventListener('messageerror', this.handleWorkerError);
 
     // Reject all pending requests (except readyTask)
     this.pendingRequests.forEach((task, id) => {
-      if (id !== RemoteExecutor.READY_TASK_ID) {
-        task.abort('Worker destroyed');
-        this.logger.debug(LOG_SOURCE, LOG_CATEGORY, `Aborted pending request: ${id}`);
-      }
+      task.abort({ code: PdfErrorCode.Cancelled, message: 'Worker destroyed' });
+      this.logger.debug(LOG_SOURCE, LOG_CATEGORY, `Aborted pending request: ${id}`);
     });
     this.pendingRequests.clear();
 

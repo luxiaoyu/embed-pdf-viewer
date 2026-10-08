@@ -7,6 +7,7 @@ import {
   PdfPageSearchProgress,
   PdfTaskHelper,
   PdfErrorCode,
+  PdfPermissionFlag,
 } from '@embedpdf/models';
 import {
   SearchPluginConfig,
@@ -240,6 +241,15 @@ export class SearchPlugin extends BasePlugin<
     documentId: string,
     force: boolean = false,
   ): PdfTask<SearchAllPagesResult, PdfPageSearchProgress> {
+    if (
+      this.pluginConfig.respectCopyPermission &&
+      !this.checkPermission(documentId, PdfPermissionFlag.CopyContents)
+    ) {
+      return PdfTaskHelper.reject({
+        code: PdfErrorCode.Security,
+        message: 'Document disallows text search',
+      });
+    }
     const docState = this.state.documents[documentId];
     if (!docState) {
       return PdfTaskHelper.reject({

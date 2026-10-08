@@ -35,6 +35,11 @@ export class CommandsPlugin extends BasePlugin<
   private commands = new Map<string, Command>();
   private i18n: I18nCapability | null = null;
   private shortcutMap = new Map<string, string>(); // shortcut -> commandId
+  private shortcutFilter?: (event: KeyboardEvent) => boolean;
+
+  shouldHandleShortcut(event: KeyboardEvent): boolean {
+    return !event.defaultPrevented && (this.shortcutFilter?.(event) ?? true);
+  }
 
   private readonly commandExecuted$ = createEmitter<CommandExecutedEvent>();
   private readonly commandStateChanged$ = createEmitter<CommandStateChangedEvent>();
@@ -46,6 +51,7 @@ export class CommandsPlugin extends BasePlugin<
 
   constructor(id: string, registry: PluginRegistry, config: CommandsPluginConfig) {
     super(id, registry);
+    this.shortcutFilter = config.shortcutFilter;
 
     // Check if i18n plugin is available (optional dependency)
     const i18nPlugin = registry.getPlugin<I18nPlugin>('i18n');

@@ -4,17 +4,23 @@ import { useScroll } from '@embedpdf/plugin-scroll/preact';
 
 type ThumbnailsSidebarProps = {
   documentId: string;
+  active?: boolean;
   onClose?: () => void;
 };
 
-export function ThumbnailsSidebar({ documentId, onClose }: ThumbnailsSidebarProps) {
+export function ThumbnailsSidebar({ documentId, active = true, onClose }: ThumbnailsSidebarProps) {
   const { state, provides } = useScroll(documentId);
 
   return (
     <div className="flex h-full flex-1 flex-col">
       {/* Thumbnails */}
       <div className="flex-1 overflow-hidden">
-        <ThumbnailsPane documentId={documentId} style={{ width: '100%', height: '100%' }}>
+        <ThumbnailsPane
+          documentId={documentId}
+          active={active}
+          data-embedpdf-thumbnail-viewport
+          style={{ width: '100%', height: '100%' }}
+        >
           {(m) => (
             <div
               key={m.pageIndex}
@@ -35,6 +41,8 @@ export function ThumbnailsSidebar({ documentId, onClose }: ThumbnailsSidebarProp
               }}
             >
               <div
+                data-embedpdf-thumbnail
+                data-embedpdf-thumbnail-page-index={m.pageIndex}
                 style={{
                   width: m.width,
                   height: m.height,

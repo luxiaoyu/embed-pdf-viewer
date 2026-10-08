@@ -1226,7 +1226,10 @@ export class SelectionPlugin extends BasePlugin<
 
     const text = this.getSelectedText(documentId);
     text.wait((text) => {
-      this.copyToClipboard$.emit(documentId, text.join('\n'));
+      this.copyToClipboard$.emit(
+        documentId,
+        text.map((value) => value.normalize('NFKC').replaceAll('\0', '')).join('\n'),
+      );
     }, ignore);
   }
 

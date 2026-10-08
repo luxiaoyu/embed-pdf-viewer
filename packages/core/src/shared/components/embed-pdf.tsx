@@ -25,6 +25,7 @@ interface EmbedPDFProps {
    * The callback to call when the PDF viewer is initialized.
    */
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
+  onError?: (error: Error) => void;
   /**
    * The plugins to use for the PDF viewer.
    */
@@ -45,6 +46,7 @@ export function EmbedPDF({
   config,
   logger,
   onInitialized,
+  onError,
   plugins,
   children,
   autoMountDomElements = true,
@@ -93,11 +95,14 @@ export function EmbedPDF({
         return;
       }
 
-      pdfViewer.pluginsReady().then(() => {
-        if (!pdfViewer.isDestroyed()) {
-          setPluginsReady(true);
-        }
-      });
+      pdfViewer
+        .pluginsReady()
+        .then(() => {
+          if (!pdfViewer.isDestroyed()) {
+            setPluginsReady(true);
+          }
+        })
+        .catch((error) => onError?.(error instanceof Error ? error : new Error(String(error))));
 
       // Provide the registry to children via context
       setRegistry(pdfViewer);
@@ -112,11 +117,14 @@ export function EmbedPDF({
       .then((unsub) => {
         cleanup = unsub;
       })
-      .catch(console.error);
+      .catch((error) => {
+        if (!pdfViewer.isDestroyed())
+          onError?.(error instanceof Error ? error : new Error(String(error)));
+      });
 
     return () => {
       cleanup?.();
-      pdfViewer.destroy();
+      pdfViewer.destroy().catch(() => {});
       setRegistry(null);
       setCoreState(null);
       setIsInitializing(true);

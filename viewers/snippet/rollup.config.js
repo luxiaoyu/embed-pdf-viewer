@@ -18,6 +18,7 @@ import terser from '@rollup/plugin-terser';
 import copy from 'rollup-plugin-copy';
 import alias from '@rollup/plugin-alias';
 import replace from '@rollup/plugin-replace';
+import { runtimeNotices } from './build/runtime-notices.mjs';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -118,6 +119,7 @@ export default [
         module: true,
         compress: isDev ? false : true,
       }),
+      runtimeNotices(),
       isDev &&
         livereload({
           watch: 'dist',

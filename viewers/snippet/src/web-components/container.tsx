@@ -1,6 +1,11 @@
 import { h, render } from 'preact';
 import { PDFViewer, PDFViewerConfig } from '@/components/app';
-import { PluginRegistry } from '@embedpdf/core';
+import { PluginRegistry, refreshPages } from '@embedpdf/core';
+import type { HostedToolbarSnapshot, HostedToolbarSource } from '@/components/hosted-toolbar';
+import { UIPlugin } from '@embedpdf/plugin-ui';
+import { ViewportPlugin } from '@embedpdf/plugin-viewport';
+import { AnnotationPlugin } from '@embedpdf/plugin-annotation';
+import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import {
   ThemeConfig,
   ThemePreference,
@@ -26,6 +31,54 @@ export class EmbedPdfContainer extends (BaseElement as typeof HTMLElement) {
   private _config?: PDFViewerConfig;
   private _registryPromise: Promise<PluginRegistry>;
   private _resolveRegistry: ((registry: PluginRegistry) => void) | null = null;
+  private _rejectRegistry: ((error: Error) => void) | null = null;
+  private registryValue: PluginRegistry | null = null;
+  private unsubscribeNavigation: (() => void) | null = null;
+  private suspended = false;
+  private toolbarTarget: HTMLElement | null = null;
+  private toolbarOverlay: HTMLElement | null = null;
+  private toolbarTheme = '';
+  private toolbarListeners = new Set<() => void>();
+  private readonly hostedToolbar: HostedToolbarSource = {
+    getSnapshot: (): HostedToolbarSnapshot => ({
+      target: this.toolbarTarget,
+      overlay: this.toolbarOverlay?.shadowRoot ?? null,
+      theme: this.toolbarTheme,
+    }),
+    subscribe: (listener) => {
+      this.toolbarListeners.add(listener);
+      return () => this.toolbarListeners.delete(listener);
+    },
+  };
+
+  setToolbarTarget(target: HTMLElement | null): void {
+    if (this.toolbarTarget === target) return;
+    const documentId = this.registryValue
+      ?.getPlugin<DocumentManagerPlugin>('document-manager')
+      ?.provides()
+      .getActiveDocumentId();
+    if (documentId)
+      this.registryValue
+        ?.getPlugin<UIPlugin>('ui')
+        ?.provides()
+        .forDocument(documentId)
+        .closeAllMenus();
+    this.toolbarTarget = target;
+    if (target && !this.toolbarOverlay) {
+      this.toolbarOverlay = document.createElement('div');
+      this.toolbarOverlay.setAttribute('data-embedpdf-host-menus', '');
+      Object.assign(this.toolbarOverlay.style, {
+        position: 'fixed',
+        inset: '0',
+        zIndex: '10000',
+        pointerEvents: 'none',
+      });
+      this.toolbarOverlay.attachShadow({ mode: 'open' });
+      document.body.appendChild(this.toolbarOverlay);
+    }
+    this.toolbarListeners.forEach((listener) => listener());
+  }
+
   private themeStyleEl: HTMLStyleElement | null = null;
   private systemPreferenceCleanup: (() => void) | null = null;
 
@@ -34,9 +87,11 @@ export class EmbedPdfContainer extends (BaseElement as typeof HTMLElement) {
     this.root = this.attachShadow({ mode: 'open' });
 
     // Create promise for registry that will be resolved when ready
-    this._registryPromise = new Promise((resolve) => {
+    this._registryPromise = new Promise((resolve, reject) => {
       this._resolveRegistry = resolve;
+      this._rejectRegistry = reject;
     });
+    this._registryPromise.catch(() => {});
   }
 
   connectedCallback() {
@@ -54,12 +109,85 @@ export class EmbedPdfContainer extends (BaseElement as typeof HTMLElement) {
   }
 
   disconnectedCallback() {
+    this.unsubscribeNavigation?.();
+    this.unsubscribeNavigation = null;
+    this._rejectRegistry?.(new Error('Viewer removed before initialization'));
+    this._rejectRegistry = null;
+    this._resolveRegistry = null;
+    this.registryValue = null;
     // Clean up system preference listener
     this.systemPreferenceCleanup?.();
     this.systemPreferenceCleanup = null;
 
     // Unmount Preact components - triggers cleanup chain (engine destroy, plugin cleanup, etc.)
     render(null, this.root);
+    this.toolbarOverlay?.remove();
+    this.toolbarOverlay = null;
+    this.toolbarTarget = null;
+    this.toolbarListeners.clear();
+  }
+
+  destroy(): void {
+    if (this.isConnected) this.remove();
+    else this.disconnectedCallback();
+  }
+
+  /** Freeze hidden viewport geometry without releasing already-painted pages. */
+  setSuspended(value: boolean): void {
+    this.suspended = value;
+    const registry = this.registryValue;
+    if (!registry) return;
+    const viewport = registry.getPlugin<ViewportPlugin>('viewport');
+    for (const id of Object.keys(registry.getStore().getState().core.documents))
+      viewport?.setSuspended(id, value);
+  }
+
+  setContentInverted(value: boolean): void {
+    this.toggleAttribute('content-inverted', value);
+    let style = this.root.querySelector<HTMLStyleElement>('style[data-content-invert]');
+    if (!style) {
+      style = document.createElement('style');
+      style.setAttribute('data-content-invert', '');
+      style.textContent =
+        ':host([content-inverted]) [data-embedpdf-page-index] img, :host([content-inverted]) [data-embedpdf-thumbnail] img { filter: invert(1) hue-rotate(180deg); }';
+      this.root.appendChild(style);
+    }
+  }
+
+  getViewportElement(): HTMLElement | null {
+    return this.root.querySelector('[data-embedpdf-viewport]');
+  }
+
+  getPageElement(pageIndex: number): HTMLElement | null {
+    return this.root.querySelector(`[data-embedpdf-page-index="${pageIndex}"]`);
+  }
+
+  retryPage(documentId: string, pageIndex: number): void {
+    this.registryValue?.getStore().dispatch(refreshPages(documentId, [pageIndex]));
+  }
+
+  async getDocumentFeatures(
+    documentId: string,
+  ): Promise<{ formType: number; hasJavaScript: boolean; hasSignatures: boolean }> {
+    const registry = await this.registry;
+    const doc = registry
+      .getPlugin<DocumentManagerPlugin>('document-manager')
+      ?.provides()
+      .getDocument(documentId);
+    if (!doc) throw new Error('Document is not loaded');
+    const engine = registry.getEngine();
+    const [scripts, signatures] = await Promise.all([
+      engine.getDocumentJavaScriptActions(doc).toPromise(),
+      engine.getSignatures(doc).toPromise(),
+    ]);
+    let hasJavaScript = scripts.length > 0;
+    for (const page of doc.formType === 0 ? [] : doc.pages) {
+      if (hasJavaScript) break;
+      if (registry.isDestroyed()) throw new Error('Viewer was destroyed');
+      hasJavaScript =
+        (await engine.getPageWidgetJavaScriptActions(doc, page).toPromise()).length > 0;
+    }
+    return { formType: doc.formType ?? 0, hasJavaScript, hasSignatures: signatures.length > 0 };
   }
 
   /**
@@ -175,6 +303,8 @@ export class EmbedPdfContainer extends (BaseElement as typeof HTMLElement) {
   private injectTheme() {
     const theme = this.resolveActiveTheme();
     const css = generateThemeStylesheet(theme);
+    this.toolbarTheme = css;
+    this.toolbarListeners.forEach((listener) => listener());
 
     // Find existing theme style or create new one
     let existingStyle = this.root.querySelector(
@@ -245,16 +375,75 @@ export class EmbedPdfContainer extends (BaseElement as typeof HTMLElement) {
 
   // Callback to receive registry from PDFViewer
   private handleRegistryReady = (registry: PluginRegistry) => {
+    if (!this.isConnected) {
+      registry.destroy().catch(() => {});
+      return;
+    }
+    this.registryValue = registry;
+    this.unsubscribeNavigation?.();
+    this.unsubscribeNavigation =
+      registry
+        .getPlugin<AnnotationPlugin>('annotation')
+        ?.provides()
+        .onNavigate((event) => {
+          if (event.result.outcome === 'uri') this._config?.onNavigate?.(event.result.uri);
+          else if (event.result.outcome === 'unsupported') this.handleUnsupportedNavigate();
+        }) ?? null;
+    this.setSuspended(this.suspended);
     if (this._resolveRegistry) {
       this._resolveRegistry(registry);
       this._resolveRegistry = null; // Clear after resolving
+      this._rejectRegistry = null;
     }
+    this.dispatchEvent(new CustomEvent('embedpdf-ready', { detail: { registry } }));
+  };
+
+  private handleError = (error: Error) => {
+    this._rejectRegistry?.(error);
+    this._rejectRegistry = null;
+    this._resolveRegistry = null;
+    this.dispatchEvent(new CustomEvent('embedpdf-error', { detail: { error } }));
+  };
+
+  private handleUnsupportedNavigate = () => {
+    this._config?.onUnsupportedNavigate?.();
+    this.dispatchEvent(new CustomEvent('embedpdf-navigation-unsupported'));
+  };
+
+  private handlePageRender = (event: {
+    documentId: string;
+    pageIndex: number;
+    error?: string;
+    errorCode?: number;
+  }) => {
+    this._config?.onPageRender?.(event);
+    this.dispatchEvent(
+      new CustomEvent(event.error ? 'embedpdf-page-error' : 'embedpdf-page-rendered', {
+        detail: event,
+      }),
+    );
   };
 
   renderViewer() {
     if (!this._config) return;
     render(
-      <PDFViewer config={this._config} onRegistryReady={this.handleRegistryReady} />,
+      <PDFViewer
+        config={{
+          ...this._config,
+          hostedToolbar: this.hostedToolbar,
+          onPageRender: this.handlePageRender,
+          onUnsupportedNavigate: this.handleUnsupportedNavigate,
+          commands: {
+            ...this._config.commands,
+            shortcutFilter: (event) =>
+              !this.suspended &&
+              (event.composedPath().includes(this) ||
+                Boolean(this.toolbarTarget && event.composedPath().includes(this.toolbarTarget))),
+          },
+        }}
+        onRegistryReady={this.handleRegistryReady}
+        onError={this.handleError}
+      />,
       this.root,
     );
 

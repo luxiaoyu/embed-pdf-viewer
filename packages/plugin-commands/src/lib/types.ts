@@ -74,6 +74,8 @@ export interface GlobalStoreState<TPlugins extends Record<string, any> = {}> {
 }
 
 export interface CommandsPluginConfig extends BasePluginConfig {
+  /** Optional host scope for document-level keyboard listeners. */
+  shortcutFilter?: (event: KeyboardEvent) => boolean;
   commands: Record<string, Command>;
   /** Categories to disable at initialization */
   disabledCategories?: string[];

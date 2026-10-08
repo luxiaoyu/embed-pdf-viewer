@@ -1,4 +1,4 @@
-import { ignore, PdfErrorCode } from '@embedpdf/models';
+import { PdfErrorCode } from '@embedpdf/models';
 import { Tile } from '@embedpdf/plugin-tiling';
 import { useEffect, useMemo, useRef, useState } from '@framework';
 
@@ -10,9 +10,10 @@ interface TileImgProps {
   tile: Tile;
   dpr: number;
   scale: number;
+  onRenderError?: (error: string, code?: number) => void;
 }
 
-export function TileImg({ documentId, pageIndex, tile, dpr, scale }: TileImgProps) {
+export function TileImg({ documentId, pageIndex, tile, dpr, scale, onRenderError }: TileImgProps) {
   const { provides: tilingCapability } = useTilingCapability();
   const scope = useMemo(
     () => tilingCapability?.forDocument(documentId),
@@ -21,6 +22,8 @@ export function TileImg({ documentId, pageIndex, tile, dpr, scale }: TileImgProp
 
   const [url, setUrl] = useState<string>();
   const urlRef = useRef<string | null>(null);
+  const errorCallback = useRef(onRenderError);
+  errorCallback.current = onRenderError;
 
   const relativeScale = scale / tile.srcScale;
 
@@ -28,14 +31,23 @@ export function TileImg({ documentId, pageIndex, tile, dpr, scale }: TileImgProp
   useEffect(() => {
     if (tile.status === 'ready' && urlRef.current) return; // already done
     if (!scope) return;
+    let disposed = false;
     const task = scope.renderTile({ pageIndex, tile, dpr });
-    task.wait((blob) => {
-      const objectUrl = URL.createObjectURL(blob);
-      urlRef.current = objectUrl;
-      setUrl(objectUrl);
-    }, ignore);
+    task.wait(
+      (blob) => {
+        if (disposed) return;
+        const objectUrl = URL.createObjectURL(blob);
+        urlRef.current = objectUrl;
+        setUrl(objectUrl);
+      },
+      (error) => {
+        if (!disposed && error.type !== 'abort')
+          errorCallback.current?.(error.reason.message, error.reason.code);
+      },
+    );
 
     return () => {
+      disposed = true;
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current);
         urlRef.current = null;
@@ -60,6 +72,9 @@ export function TileImg({ documentId, pageIndex, tile, dpr, scale }: TileImgProp
     <img
       src={url}
       onLoad={handleImageLoad}
+      onError={() =>
+        errorCallback.current?.('PDF tile image failed to decode', PdfErrorCode.PageError)
+      }
       style={{
         position: 'absolute',
         left: tile.screenRect.origin.x * relativeScale,

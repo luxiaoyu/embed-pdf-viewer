@@ -63,6 +63,8 @@ export interface ZoomDocumentState {
 // Scoped zoom capability
 export interface ZoomScope {
   requestZoom(level: ZoomLevel, center?: Point): void;
+  /** Control viewport-resize fitting without changing the requested zoom mode. */
+  setAutoZoomOnResize(enabled: boolean): void;
   requestZoomBy(delta: number, center?: Point): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -79,6 +81,8 @@ export interface ZoomScope {
 export interface ZoomCapability {
   // Active document operations
   requestZoom(level: ZoomLevel, center?: Point): void;
+  /** Control viewport-resize fitting for the active document. Defaults to enabled. */
+  setAutoZoomOnResize(enabled: boolean): void;
   requestZoomBy(delta: number, center?: Point): void;
   zoomIn(): void;
   zoomOut(): void;

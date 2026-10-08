@@ -46,6 +46,20 @@ export class ViewportPlugin extends BasePlugin<
   static readonly id = 'viewport' as const;
 
   private readonly viewportResize$ = createBehaviorEmitter<ViewportEvent>();
+  private readonly resume$ = createEmitter<string>();
+  private readonly suspended = new Set<string>();
+
+  /** Freeze viewport metrics while a mounted host is hidden, retaining painted pages. */
+  public setSuspended(documentId: string, value: boolean): void {
+    if (value) this.suspended.add(documentId);
+    else if (this.suspended.delete(documentId)) this.resume$.emit(documentId);
+  }
+
+  public onResume(documentId: string, listener: () => void) {
+    return this.resume$.on((id) => {
+      if (id === documentId) listener();
+    });
+  }
   private readonly viewportMetrics$ = createBehaviorEmitter<ViewportEvent>();
   private readonly scrollMetrics$ = createBehaviorEmitter<ScrollChangeEvent>();
   private readonly scrollActivity$ = createBehaviorEmitter<ScrollActivityEvent>();
@@ -92,6 +106,7 @@ export class ViewportPlugin extends BasePlugin<
   }
 
   protected override onDocumentClosed(documentId: string): void {
+    this.suspended.delete(documentId);
     // Cleanup viewport state
     this.dispatch(cleanupViewportState(documentId));
 
@@ -225,7 +240,7 @@ export class ViewportPlugin extends BasePlugin<
      * On unmount the Registry may be destroyed before pending browser callbacks
      * run—short-circuit so we don’t dispatch into a torn-down store.
      */
-    if (this.registry.isDestroyed()) return;
+    if (this.registry.isDestroyed() || this.suspended.has(documentId)) return;
 
     this.dispatch(setViewportMetrics(documentId, metrics));
 
@@ -244,7 +259,7 @@ export class ViewportPlugin extends BasePlugin<
      * On unmount the Registry may be destroyed before pending browser callbacks
      * run—short-circuit so we don’t dispatch into a torn-down store.
      */
-    if (this.registry.isDestroyed()) return;
+    if (this.registry.isDestroyed() || this.suspended.has(documentId)) return;
 
     const viewport = this.state.documents[documentId];
     if (!viewport) return;
@@ -464,6 +479,8 @@ export class ViewportPlugin extends BasePlugin<
   }
 
   async destroy(): Promise<void> {
+    this.resume$.clear();
+    this.suspended.clear();
     // Clear all emitters
     this.viewportMetrics$.clear();
     this.viewportResize$.clear();

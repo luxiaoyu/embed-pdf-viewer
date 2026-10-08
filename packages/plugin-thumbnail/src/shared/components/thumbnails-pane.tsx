@@ -7,13 +7,23 @@ type ThumbnailsProps = Omit<HTMLAttributes<HTMLDivElement>, 'style' | 'children'
    * The ID of the document that this thumbnail pane displays
    */
   documentId: string;
+  /** Hidden retained panes keep their position instead of following document navigation. */
+  active?: boolean;
   style?: CSSProperties;
   children: (m: any) => ReactNode;
 };
 
-export function ThumbnailsPane({ documentId, style, children, ...props }: ThumbnailsProps) {
+export function ThumbnailsPane({
+  documentId,
+  active = true,
+  style,
+  children,
+  ...props
+}: ThumbnailsProps) {
   const { plugin: thumbnailPlugin } = useThumbnailPlugin();
   const viewportRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   // Store window data along with the documentId it came from
   const [windowData, setWindowData] = useState<{
@@ -88,7 +98,9 @@ export function ThumbnailsPane({ documentId, style, children, ...props }: Thumbn
 
     const scope = thumbnailPlugin.provides().forDocument(documentId);
     return scope.onScrollTo(({ top, behavior }) => {
-      vp.scrollTo({ top, behavior });
+      if (activeRef.current) {
+        vp.scrollTo({ top, behavior });
+      }
     });
   }, [thumbnailPlugin, documentId, !!window]);
 

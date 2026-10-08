@@ -61,6 +61,7 @@ export class ZoomPlugin extends BasePlugin<
   private readonly presets: ZoomPreset[];
   private readonly zoomRanges: ZoomRangeStep[];
   private readonly defaultZoomLevel: ZoomMode | number;
+  private readonly autoResizeDisabled = new Set<string>();
 
   private readonly minZoom: number;
   private readonly maxZoom: number;
@@ -86,7 +87,11 @@ export class ZoomPlugin extends BasePlugin<
 
     // Keep automatic modes up to date per document
     this.viewport.onViewportResize(
-      (event) => this.recalcAuto(event.documentId, VerticalZoomFocus.Top),
+      (event) => {
+        if (!this.autoResizeDisabled.has(event.documentId)) {
+          this.recalcAuto(event.documentId, VerticalZoomFocus.Top);
+        }
+      },
       {
         mode: 'debounce',
         wait: 150,
@@ -146,6 +151,7 @@ export class ZoomPlugin extends BasePlugin<
   }
 
   protected override onDocumentClosed(documentId: string): void {
+    this.autoResizeDisabled.delete(documentId);
     this.dispatch(cleanupZoomState(documentId));
 
     this.logger.debug(
@@ -174,6 +180,7 @@ export class ZoomPlugin extends BasePlugin<
     return {
       // Active document operations
       requestZoom: (level, c) => this.requestZoom(level, c),
+      setAutoZoomOnResize: (enabled) => this.setAutoZoomOnResize(enabled),
       requestZoomBy: (d, c) => this.requestZoomBy(d, c),
       zoomIn: () => this.zoomIn(),
       zoomOut: () => this.zoomOut(),
@@ -204,6 +211,7 @@ export class ZoomPlugin extends BasePlugin<
   private createZoomScope(documentId: string): ZoomScope {
     return {
       requestZoom: (level, c) => this.requestZoom(level, c, documentId),
+      setAutoZoomOnResize: (enabled) => this.setAutoZoomOnResize(enabled, documentId),
       requestZoomBy: (d, c) => this.requestZoomBy(d, c, documentId),
       zoomIn: () => this.zoomIn(documentId),
       zoomOut: () => this.zoomOut(documentId),
@@ -247,6 +255,15 @@ export class ZoomPlugin extends BasePlugin<
 
   private requestZoom(level: ZoomMode | number, center?: Point, documentId?: string): void {
     this.handleRequest({ level, center }, documentId);
+  }
+
+  private setAutoZoomOnResize(enabled: boolean, documentId?: string): void {
+    const id = documentId ?? this.getActiveDocumentId();
+    if (enabled) {
+      this.autoResizeDisabled.delete(id);
+    } else {
+      this.autoResizeDisabled.add(id);
+    }
   }
 
   private requestZoomBy(delta: number, center?: Point, documentId?: string): void {
@@ -325,7 +342,8 @@ export class ZoomPlugin extends BasePlugin<
     // Step 1: Resolve target numeric zoom
     const base = typeof level === 'number' ? level : this.computeZoomForMode(id, level, metrics);
 
-    if (base === false) return;
+    // Relative steps may cross minZoom and should clamp to it; absolute requests must be positive.
+    if (base === false || !Number.isFinite(base + delta) || (delta === 0 && base <= 0)) return;
 
     const exactZoom = clamp(base + delta, this.minZoom, this.maxZoom);
     const newZoom = Math.floor(exactZoom * 1000) / 1000;

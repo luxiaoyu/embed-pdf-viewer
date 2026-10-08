@@ -74,12 +74,12 @@ export function createPdfiumEngine(
   const { logger, encoderPoolSize, fontFallback } = config;
 
   // Create PDFium worker
-  const worker = new Worker(
-    URL.createObjectURL(new Blob([__WEBWORKER_BODY__], { type: 'application/javascript' })),
-    {
-      type: 'module',
-    },
+  const workerUrl = URL.createObjectURL(
+    new Blob([__WEBWORKER_BODY__], { type: 'application/javascript' }),
   );
+  const worker = new Worker(workerUrl, {
+    type: 'module',
+  });
 
   // Create RemoteExecutor (proxy to worker) - handles wasmInit internally
   const remoteExecutor = new RemoteExecutor(worker, { wasmUrl, logger, fontFallback });
@@ -94,8 +94,15 @@ export function createPdfiumEngine(
   );
 
   // Create the "smart" orchestrator
-  return new PdfEngine<Blob>(remoteExecutor, {
+  const engine = new PdfEngine<Blob>(remoteExecutor, {
     imageConverter: createHybridImageConverter(encoderPool),
     logger,
   });
+  const destroy = engine.destroy.bind(engine);
+  engine.destroy = () => {
+    URL.revokeObjectURL(workerUrl);
+    URL.revokeObjectURL(finalEncoderWorkerUrl);
+    return destroy();
+  };
+  return engine;
 }

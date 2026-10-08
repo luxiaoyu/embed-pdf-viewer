@@ -75,13 +75,13 @@ export function createTextSelectionHandler(
   // Triple-click detection: timestamp of the most recent dblclick
   let lastDblClickTime = 0;
 
-  function reset() {
+  function reset(clearSharedAnchor = true) {
     anchorGlyph = null;
     anchorPos = null;
     anchorPointerId = undefined;
     anchorPointerType = undefined;
     dragStarted = false;
-    opts.setHasTextAnchor?.(false);
+    if (clearSharedAnchor) opts.setHasTextAnchor?.(false);
   }
 
   return {
@@ -91,7 +91,9 @@ export function createTextSelectionHandler(
       // A release over another page may have ended the shared selection from
       // that page's handler. Discard this page's old drag anchor before starting
       // a new gesture.
-      reset();
+      // Another page can still own a pending anchor before its drag threshold
+      // is met. Only clear the shared flag if this page had an anchor.
+      reset(anchorGlyph !== null);
 
       // Detect click on empty page space (fires for ALL modes)
       if (evt.target === evt.currentTarget) {

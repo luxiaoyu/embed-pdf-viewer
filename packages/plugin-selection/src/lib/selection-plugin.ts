@@ -815,8 +815,8 @@ export class SelectionPlugin extends BasePlugin<
     const finishPointer = (event: PointerEvent) => {
       if (pointerId === undefined || event.pointerId === pointerId) finish();
     };
-    const finishMouse = () => {
-      if (pointerType === 'mouse' || !pointerType) finish();
+    const finishMouse = (event: MouseEvent) => {
+      if ((pointerType === 'mouse' || !pointerType) && event.buttons === 0) finish();
     };
     releaseTarget.addEventListener('pointerup', finishPointer, true);
     releaseTarget.addEventListener('pointercancel', finishPointer, true);

@@ -25,6 +25,9 @@ async function importSource(path) {
 const { createTextSelectionHandler } = await importSource(
   'packages/plugin-selection/src/lib/handlers/text-selection.handler.ts',
 );
+const { createMarqueeSelectionHandler } = await importSource(
+  'packages/plugin-selection/src/lib/handlers/marquee-selection.handler.ts',
+);
 const { createPointerProvider } = await importSource(
   'packages/plugin-interaction-manager/src/shared/utils.ts',
 );
@@ -39,6 +42,7 @@ const { zoomRequestForArea } = await importSource('packages/plugin-zoom/src/lib/
 function selectionHandlers() {
   let selecting = false;
   let activePointerId;
+  let hasTextAnchor = false;
   let ends = 0;
   const updates = [];
   const geometry = {
@@ -75,8 +79,17 @@ function selectionHandlers() {
       isActivePointer: (pointerId) =>
         activePointerId === undefined || activePointerId === pointerId,
       setCursor: () => {},
+      setHasTextAnchor: (active) => {
+        hasTextAnchor = active;
+      },
     });
-  return { makeHandler, updates, getEnds: () => ends, isSelecting: () => selecting };
+  return {
+    makeHandler,
+    updates,
+    getEnds: () => ends,
+    isSelecting: () => selecting,
+    hasTextAnchor: () => hasTextAnchor,
+  };
 }
 
 test('dragging onto the next page ends on that page pointerup', () => {
@@ -167,6 +180,48 @@ test('a new pointer can replace a stale anchor after release on another page', (
   assert.equal(state.isSelecting(), true);
 });
 
+test('a second page touch cannot start marquee while a text anchor is pending', () => {
+  const state = selectionHandlers();
+  const first = state.makeHandler(0);
+  const second = state.makeHandler(1);
+  const firstTouch = { target: {}, currentTarget: {}, pointerId: 11, pointerType: 'touch' };
+  const secondTouch = {
+    ...firstTouch,
+    pointerId: 12,
+    setPointerCapture() {},
+    releasePointerCapture() {},
+  };
+  let marqueeBegins = 0;
+  let marqueeCommits = 0;
+  const marquee = createMarqueeSelectionHandler({
+    pageSize: { width: 600, height: 800 },
+    scale: 1,
+    isEnabled: () => true,
+    isTextSelecting: () => state.isSelecting() || state.hasTextAnchor(),
+    onBegin: () => marqueeBegins++,
+    onChange: () => {},
+    onEnd: () => marqueeCommits++,
+    onCancel: () => {},
+  });
+
+  first.onPointerDown({ x: 5, y: 5 }, firstTouch, 'pointerMode');
+  assert.equal(state.isSelecting(), false);
+  assert.equal(state.hasTextAnchor(), true);
+  second.onPointerDown({ x: 400, y: 400 }, secondTouch, 'pointerMode');
+  marquee.onPointerDown({ x: 400, y: 400 }, secondTouch, 'pointerMode');
+  first.onPointerMove({ x: 35, y: 5 }, firstTouch, 'pointerMode');
+  marquee.onPointerMove({ x: 450, y: 450 }, secondTouch, 'pointerMode');
+  second.onPointerUp({ x: 450, y: 450 }, secondTouch, 'pointerMode');
+  marquee.onPointerUp({ x: 450, y: 450 }, secondTouch, 'pointerMode');
+
+  assert.equal(state.isSelecting(), true);
+  assert.deepEqual(state.updates, [[0, 1]]);
+  assert.equal(marqueeBegins, 0);
+  assert.equal(marqueeCommits, 0);
+  first.onPointerUp({ x: 35, y: 5 }, firstTouch, 'pointerMode');
+  assert.equal(state.hasTextAnchor(), false);
+});
+
 test('the page pointer provider forwards native pointer identity', () => {
   const element = new EventTarget();
   element.style = {};
@@ -227,9 +282,10 @@ test('the window release watcher ignores another touch and its mouse event', () 
       11,
       'touch',
     );
-    const release = (type, pointerId) => {
+    const release = (type, pointerId, buttons = 0) => {
       const event = new Event(type);
       event.pointerId = pointerId;
+      event.buttons = buttons;
       target.dispatchEvent(event);
     };
     release('pointerup', 12);
@@ -248,6 +304,11 @@ test('the window release watcher ignores another touch and its mouse event', () 
       1,
       'mouse',
     );
+    release('mouseup', 1, 1);
+    assert.equal(ends, 1);
+    assert.equal(scope.selecting.get('doc'), true);
+    release('mouseup', 1, 2);
+    assert.equal(ends, 1);
     release('mouseup', 1);
     assert.equal(ends, 2);
   } finally {

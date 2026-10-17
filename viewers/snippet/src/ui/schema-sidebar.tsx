@@ -1,8 +1,12 @@
+import { useDocumentState } from '@embedpdf/core/preact';
+import { PdfErrorCode } from '@embedpdf/models';
+import { useBookmarkCapability } from '@embedpdf/plugin-bookmark/preact';
+import { useTranslations } from '@embedpdf/plugin-i18n/preact';
+import { SidebarRendererProps, useItemRenderer, useUIContainer } from '@embedpdf/plugin-ui/preact';
 import { h, Fragment } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
-import { SidebarRendererProps, useItemRenderer, useUIContainer } from '@embedpdf/plugin-ui/preact';
-import { useTranslations } from '@embedpdf/plugin-i18n/preact';
+
 import { Icon } from '@/components/ui/icon';
 
 // Drawer snap points as percentages
@@ -103,6 +107,7 @@ export function SchemaSidebar({
       <div className="min-h-0 flex-1">
         {content.type === 'tabs' && (
           <TabsContent
+            key={documentId}
             content={content}
             documentId={documentId}
             renderCustomComponent={renderCustomComponent}
@@ -410,6 +415,7 @@ function BottomDrawer({
         <div className="min-h-0 flex-1 overflow-hidden">
           {content.type === 'tabs' && (
             <TabsContent
+              key={documentId}
               content={content}
               documentId={documentId}
               renderCustomComponent={renderCustomComponent}
@@ -439,6 +445,37 @@ function TabsContent({
   const { translate } = useTranslations(documentId);
   const [activeTab, setActiveTab] = useState(content.tabs[0]?.id || '');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set([activeTab]));
+  const userSelectedTab = useRef(false);
+  const { provides: bookmark } = useBookmarkCapability();
+  const documentState = useDocumentState(documentId);
+
+  useEffect(() => {
+    if (
+      !bookmark ||
+      !documentState?.document ||
+      !content.tabs.some((tab) => tab.id === 'outline') ||
+      !content.tabs.some((tab) => tab.id === 'thumbnails')
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    const task = bookmark.forDocument(documentId).getBookmarks();
+    task.wait(
+      ({ bookmarks }) => {
+        // Default only after a successful read; a late result must not replace
+        // a tab the reader has already chosen.
+        if (disposed || userSelectedTab.current || bookmarks.length > 0) return;
+        setVisitedTabs((visited) => new Set([...visited, 'thumbnails']));
+        setActiveTab('thumbnails');
+      },
+      () => {},
+    );
+    return () => {
+      disposed = true;
+      task.abort({ code: PdfErrorCode.Cancelled, message: 'Sidebar bookmark task cancelled' });
+    };
+  }, [bookmark, documentId, documentState?.document, content.tabs]);
 
   return (
     <div className="flex h-full flex-1 flex-col">
@@ -457,6 +494,7 @@ function TabsContent({
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
               onClick={() => {
+                userSelectedTab.current = true;
                 setVisitedTabs((visited) => new Set([...visited, tab.id]));
                 setActiveTab(tab.id);
               }}

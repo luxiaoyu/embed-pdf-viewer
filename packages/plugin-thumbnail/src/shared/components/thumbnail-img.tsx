@@ -30,15 +30,18 @@ export function ThumbImg({ documentId, meta, style, ...props }: ThumbnailImgProp
   }, [thumbnailPlugin, documentId, meta.pageIndex]);
 
   useEffect(() => {
+    let disposed = false;
     const scope = thumbs?.forDocument(documentId);
     const task = scope?.renderThumb(meta.pageIndex, window.devicePixelRatio);
     task?.wait((blob) => {
+      if (disposed) return;
       const objectUrl = URL.createObjectURL(blob);
       urlRef.current = objectUrl;
       setUrl(objectUrl);
     }, ignore);
 
     return () => {
+      disposed = true;
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current);
         urlRef.current = null;

@@ -20,7 +20,7 @@ import {
   ThumbnailState,
   ThumbnailDocumentState,
 } from './types';
-import { ignore, PdfErrorReason, Task } from '@embedpdf/models';
+import { ignore, PdfErrorCode, PdfErrorReason, Task } from '@embedpdf/models';
 import { RenderCapability, RenderPlugin } from '@embedpdf/plugin-render';
 import { ScrollCapability, ScrollPlugin } from '@embedpdf/plugin-scroll';
 import {
@@ -74,14 +74,15 @@ export class ThumbnailPlugin extends BasePlugin<
       const documentId = action.payload.documentId ?? this.getActiveDocumentId();
       const pages = action.payload.pageIndexes;
 
-      this.refreshPages$.emit(documentId, pages);
-
       const taskCache = this.taskCaches.get(documentId);
       if (taskCache) {
         for (const pageIndex of pages) {
+          const task = taskCache.get(pageIndex);
           taskCache.delete(pageIndex);
+          task?.abort({ code: PdfErrorCode.Cancelled, message: 'Thumbnail refreshed' });
         }
       }
+      this.refreshPages$.emit(documentId, pages);
     });
 
     // Auto-scroll thumbnails when the main scroller's current page changes
@@ -398,7 +399,9 @@ export class ThumbnailPlugin extends BasePlugin<
     });
 
     taskCache.set(idx, task);
-    task.wait(ignore, () => taskCache.delete(idx));
+    task.wait(ignore, () => {
+      if (taskCache.get(idx) === task) taskCache.delete(idx);
+    });
     return task;
   }
 

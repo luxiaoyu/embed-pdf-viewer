@@ -33,6 +33,7 @@ export class TilingPlugin extends BasePlugin<TilingPluginConfig, TilingCapabilit
   static readonly id = 'tiling' as const;
 
   private readonly tileRendering$ = createBehaviorEmitter<TilingEvent>();
+  private refreshRevision = 0;
 
   private config: TilingPluginConfig;
   private renderCapability: RenderCapability;
@@ -92,9 +93,9 @@ export class TilingPlugin extends BasePlugin<TilingPluginConfig, TilingCapabilit
     const viewportScope = this.viewportCapability.forDocument(documentId);
     const currentMetrics = scrollScope.getMetrics(viewportScope.getMetrics());
 
-    // Recalculate tiles for refreshed pages with a new timestamp
+    // Every refresh gets a distinct token, including repeated refreshes in one millisecond.
     const refreshedTiles: Record<number, Tile[]> = {};
-    const refreshTimestamp = Date.now();
+    const refreshRevision = ++this.refreshRevision;
     const scale = coreDoc.scale;
 
     for (const pageIndex of pageIndexes) {
@@ -119,7 +120,7 @@ export class TilingPlugin extends BasePlugin<TilingPluginConfig, TilingCapabilit
         extraRings: this.config.extraRings,
       }).map((tile) => ({
         ...tile,
-        id: `${tile.id}-r${refreshTimestamp}`, // Add refresh token to force new render
+        id: `${tile.id}-r${refreshRevision}`,
       }));
     }
 
